@@ -11,7 +11,21 @@ public static class GallerySampleService
         string galleryUrl,
         DownloadOptions options,
         CancellationToken cancellationToken)
+        => await GetSampleUrlsAsync(
+            enginePath,
+            galleryUrl,
+            options,
+            maximumItems: 40,
+            cancellationToken: cancellationToken);
+
+    public static async Task<IReadOnlyList<Uri>> GetSampleUrlsAsync(
+        string enginePath,
+        string galleryUrl,
+        DownloadOptions options,
+        int maximumItems,
+        CancellationToken cancellationToken)
     {
+        maximumItems = Math.Clamp(maximumItems, 1, 40);
         Directory.CreateDirectory(SettingsStore.DataDirectory);
         var configPath = Path.Combine(
             SettingsStore.DataDirectory, $"probe-{Guid.NewGuid():N}.json");
@@ -34,7 +48,8 @@ public static class GallerySampleService
                 StandardErrorEncoding = Encoding.UTF8
             };
             Add(info, "--config-ignore", "--config-json", configPath);
-            Add(info, "--no-input", "--no-colors", "--get-urls", "--range", "1-40");
+            Add(info, "--no-input", "--no-colors", "--get-urls", "--range",
+                $"1-{maximumItems}");
             Add(info, "--http-timeout", "25", "--retries", "1");
             if (options.UseProxy) Add(info, "--proxy", options.ProxyUrl);
             if (options.UseBrowserCookies)

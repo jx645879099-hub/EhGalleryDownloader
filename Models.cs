@@ -190,4 +190,5 @@ public sealed record NodeProbeMeasurement(
 public sealed record NodeTestRecoveryState(
     string Endpoint,
     string Group,
-    string Node);
+    string Node,
+    string Mode = "");

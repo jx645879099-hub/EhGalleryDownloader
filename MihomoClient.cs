@@ -212,6 +212,17 @@ public sealed class MihomoClient : IDisposable
         await EnsureSuccessAsync(response, cancellationToken);
     }
 
+    public async Task SetModeAsync(
+        string mode,
+        CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.PatchAsJsonAsync(
+            "configs",
+            new { mode = mode.Trim().ToLowerInvariant() },
+            cancellationToken);
+        await EnsureSuccessAsync(response, cancellationToken);
+    }
+
     public async Task<bool> HasConnectionThroughNodeAsync(
         string host,
         string nodeName,

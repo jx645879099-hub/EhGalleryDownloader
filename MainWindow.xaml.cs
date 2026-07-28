@@ -36,8 +36,10 @@ public partial class MainWindow : Window
     private MihomoClient? _mihomoClient;
     private ClashState? _clashState;
     private IReadOnlyList<Uri>? _gallerySamples;
+    private Func<CancellationToken, Task<IReadOnlyList<Uri>>>? _gallerySampleRefresh;
     private string? _nodeTestGroup;
     private string? _nodeBeforeTest;
+    private string? _modeBeforeNodeTest;
     private string? _resultGroup;
     private bool _isNodeTesting;
     private bool _syncingCookieInputs;
@@ -1109,6 +1111,8 @@ public partial class MainWindow : Window
         {
             NodeResults.Clear();
             _resultGroup = null;
+            _gallerySamples = null;
+            _gallerySampleRefresh = null;
             PreciseNodeTestButton.IsEnabled = false;
             UseTestedNodeButton.IsEnabled = false;
         }
@@ -1128,7 +1132,7 @@ public partial class MainWindow : Window
         NodeCandidateText.Text =
             $"可测 {candidates.Count} 个实际节点"
             + (ignored > 0 ? $"；忽略 {ignored} 个策略组/特殊项" : "")
-            + "；先并发剔除 Error，再对候选进行小流量实测";
+            + "；先用 Clash 剔除断线节点，再进行真实图片下载测速";
         QuickNodeTestButton.IsEnabled =
             !_isNodeTesting && _runningJob is null && candidates.Count > 0;
     }
@@ -1164,7 +1168,7 @@ public partial class MainWindow : Window
         if (testAllReachable && nodes.Count >= 40)
         {
             var answer = MessageBox.Show(
-                $"将先用 Clash 并发剔除 Error 节点，再对所有通过画廊连通检测的节点进行真实下载测速。"
+                $"将先用 Clash 并发剔除断线节点，再对所有可联网节点进行真实图片下载测速。"
                 + $"\n当前策略组共有 {nodes.Count} 个节点，完整模式可能耗时较长。\n\n"
                 + "测试期间会保存并最终恢复当前节点。是否继续？",
                 "确认完整检测",
@@ -1185,6 +1189,8 @@ public partial class MainWindow : Window
         }
 
         NodeResults.Clear();
+        _gallerySamples = null;
+        _gallerySampleRefresh = null;
         foreach (var node in nodes)
         {
             NodeResults.Add(new NodeProbeResult
@@ -1197,8 +1203,8 @@ public partial class MainWindow : Window
 
         IReadOnlyList<NodeProbeResult> realTestCandidates = [];
         var clashReachableCount = 0;
-        var galleryReachableCount = 0;
         var screeningCompleted = false;
+        var options = CreateJob(url).Options;
         try
         {
             _isNodeTesting = true;
@@ -1208,7 +1214,6 @@ public partial class MainWindow : Window
             SetRunningUi(false);
             SetNodeTestingUi(true);
             ActivityProgressBar.IsIndeterminate = true;
-            var options = CreateJob(url).Options;
 
             var clashDelays = await _mihomoClient!.MeasureGroupDelaysAsync(
                 group.Name,
@@ -1240,76 +1245,63 @@ public partial class MainWindow : Window
                 .Where(result => result.ClashDelayMs > 0)
                 .OrderBy(result => result.ClashDelayMs)
                 .First();
-            if (!_clashState!.Proxies.TryGetValue(group.Name, out var currentGroup))
-                throw new InvalidOperationException("所选策略组已发生变化，请重新打开节点测速。");
-
-            _nodeTestGroup = group.Name;
-            _nodeBeforeTest = currentGroup.Now;
-            await SaveNodeTestRecoveryAsync();
+            var routeGroup = ResolveNodeTestRouteGroup(
+                group.Name,
+                nodes.Select(node => node.Name));
+            await BeginNodeTestRoutingAsync(
+                routeGroup,
+                _nodeTestCancellation.Token);
             NodeTestStatusText.Text =
                 $"第一关完成：{nodes.Count} → {clashReachableCount}；"
+                + (routeGroup.Equals("GLOBAL", StringComparison.OrdinalIgnoreCase)
+                    ? "测速期间将临时使用全局模式并在结束后恢复；"
+                    : "")
                 + $"正在临时使用 {bootstrap.Name} 读取画廊图片地址…";
             await _mihomoClient.SelectProxyAsync(
-                group.Name, bootstrap.Name, _nodeTestCancellation.Token);
+                routeGroup, bootstrap.Name, _nodeTestCancellation.Token);
             await Task.Delay(350, _nodeTestCancellation.Token);
             _gallerySamples = await GallerySampleService.GetSampleUrlsAsync(
-                engine, url, options, _nodeTestCancellation.Token);
-
-            NodeTestStatusText.Text =
-                $"第二关：正在用真实画廊图片地址并发检查 {clashReachableCount} 个节点…";
-            var galleryDelays = await _mihomoClient.MeasureGroupDelaysAsync(
-                group.Name,
-                NodeResults
-                    .Where(result => result.ClashDelayMs > 0)
-                    .Select(result => result.Name)
-                    .ToArray(),
-                _gallerySamples[0],
-                timeoutMilliseconds: 4500,
-                expectedStatus: "200-399",
-                _nodeTestCancellation.Token);
-            foreach (var result in NodeResults.Where(result => result.ClashDelayMs > 0))
-            {
-                result.GalleryScreened = true;
-                result.GalleryDelayMs =
-                    galleryDelays.TryGetValue(result.Name, out var delay) ? delay : 0;
-                if (result.GalleryDelayMs <= 0)
-                {
-                    result.Rating = "已淘汰";
-                    result.Status = "画廊图片连接 Error";
-                    result.Details =
-                        "普通联网正常，但无法连接当前画廊的真实图片服务器，因此不再进行真实下载测速。";
-                }
-            }
+                engine,
+                url,
+                options,
+                maximumItems: 1,
+                cancellationToken: _nodeTestCancellation.Token);
+            _gallerySampleRefresh = cancellationToken =>
+                GallerySampleService.GetSampleUrlsAsync(
+                    engine,
+                    url,
+                    options,
+                    maximumItems: 1,
+                    cancellationToken: cancellationToken);
 
             realTestCandidates = NodeScreeningLogic.SelectForRealTest(
                 NodeResults,
                 testAllReachable,
                 NodeScreeningLogic.DefaultSmartLimit);
-            galleryReachableCount = NodeResults.Count(result => result.GalleryDelayMs > 0);
-            foreach (var result in NodeResults.Where(result => result.GalleryDelayMs > 0))
+            foreach (var result in NodeResults.Where(result => result.ClashDelayMs > 0))
             {
                 result.EligibleForRealTest = realTestCandidates.Contains(result);
                 if (result.EligibleForRealTest)
                 {
                     result.Rating = "待实测";
-                    result.Status = "通过两关，等待真实测速";
+                    result.Status = "Clash 可用，等待真实下载";
                     result.Details =
-                        $"Clash 延迟 {result.ClashDelayMs} ms；"
-                        + $"画廊连通 {result.GalleryDelayMs} ms。";
+                        $"Clash 延迟 {result.ClashDelayMs} ms。"
+                        + "接下来会真实读取图片数据；首次失败时会重新分配图片服务器再试一次。";
                 }
                 else
                 {
                     result.Rating = "候选保留";
                     result.Status = "智能模式暂不实测";
                     result.Details =
-                        "两项快速检测均通过；为缩短时间，本轮不进行真实下载。"
+                        "Clash 联网检测通过；为缩短时间，本轮不进行真实下载。"
                         + "可选择“检测全部可用节点”重新测试。";
                 }
             }
             SortNodeResults();
             if (realTestCandidates.Count == 0)
                 throw new InvalidOperationException(
-                    "没有节点能够连接当前画廊的图片服务器。建议换一个策略组或稍后重试。");
+                    "Clash 快速检测没有留下可用于真实测速的节点。建议稍后重试。");
 
             screeningCompleted = true;
         }
@@ -1343,16 +1335,17 @@ public partial class MainWindow : Window
         var gallerySamples = _gallerySamples
                              ?? throw new InvalidOperationException("画廊测试地址意外丢失。");
         var summary =
-            $"{nodes.Count}→{clashReachableCount}→{galleryReachableCount}→{realTestCandidates.Count}";
+            $"{nodes.Count}→{clashReachableCount}→{realTestCandidates.Count}";
         NodeTestStatusText.Text =
-            $"快速筛选完成（总数→联网→画廊→实测：{summary}），开始真实下载测速…";
+            $"快速筛选完成（总数→联网→实测：{summary}），开始真实图片下载测速…";
         await RunNodeTestStageAsync(
             group.Name,
             realTestCandidates,
             gallerySamples.Take(1).ToList(),
-            768L * 1024,
-            4,
-            $"真实快测 {summary}");
+            512L * 1024,
+            5,
+            $"真实快测 {summary}",
+            _gallerySampleRefresh);
     }
 
     private async void PreciseNodeTestButton_Click(object sender, RoutedEventArgs e)
@@ -1384,7 +1377,8 @@ public partial class MainWindow : Window
             _gallerySamples.Take(3).ToList(),
             8L * 1024 * 1024,
             12,
-            "精确复测");
+            "精确复测",
+            _gallerySampleRefresh);
     }
 
     private async Task RunNodeTestStageAsync(
@@ -1393,27 +1387,47 @@ public partial class MainWindow : Window
         IReadOnlyList<Uri> samples,
         long bytesPerSample,
         int timeoutSeconds,
-        string stageName)
+        string stageName,
+        Func<CancellationToken, Task<IReadOnlyList<Uri>>>? refreshSamples = null)
     {
         if (_mihomoClient is null || _clashState is null || samples.Count == 0) return;
-        if (!_clashState.Proxies.TryGetValue(groupName, out var currentGroup))
-        {
-            NodeTestStatusText.Text = "所选策略组已经不存在，请重新连接 Clash。";
-            return;
-        }
+        var routeGroup = ResolveNodeTestRouteGroup(
+            groupName,
+            results.Select(result => result.Name));
 
         _nodeTestCancellation = new CancellationTokenSource();
-        _nodeTestGroup = groupName;
-        _nodeBeforeTest = currentGroup.Now;
-        await SaveNodeTestRecoveryAsync();
+        try
+        {
+            await BeginNodeTestRoutingAsync(
+                routeGroup,
+                _nodeTestCancellation.Token);
+        }
+        catch (Exception ex)
+        {
+            if (!string.IsNullOrWhiteSpace(_nodeTestGroup))
+                await RestoreNodeAfterTestAsync();
+            _nodeTestCancellation.Dispose();
+            _nodeTestCancellation = null;
+            NodeTestStatusText.Text =
+                $"无法建立独立的节点测速通道：{FriendlyError(ex.Message)}";
+            return;
+        }
         _isNodeTesting = true;
         SetRunningUi(false);
         SetNodeTestingUi(true);
         ActivityProgressBar.IsIndeterminate = false;
         ActivityProgressBar.Value = 0;
         var completedNormally = true;
+        var probeOptions = CreateJob(UrlTextBox.Text.Trim()).Options;
         var service = new GalleryNodeTestService(
-            _mihomoClient, NormalizeProxy(ProxyTextBox.Text));
+            _mihomoClient,
+            NormalizeProxy(ProxyTextBox.Text),
+            UrlTextBox.Text.Trim(),
+            GetSelectedTag(LoginModeComboBox, "manual") == "manual"
+                ? GetManualCookie()
+                : null,
+            _engineManager.FindEngine(),
+            probeOptions.ForceIpv4);
 
         try
         {
@@ -1431,13 +1445,14 @@ public partial class MainWindow : Window
                 try
                 {
                     var measurement = await service.TestAsync(
-                        groupName,
+                        routeGroup,
                         result.Name,
                         samples,
                         bytesPerSample,
                         timeoutSeconds,
                         progress,
-                        _nodeTestCancellation.Token);
+                        _nodeTestCancellation.Token,
+                        refreshSamples);
                     ApplyNodeMeasurement(result, measurement, stageName);
                 }
                 catch (OperationCanceledException)
@@ -1607,7 +1622,10 @@ public partial class MainWindow : Window
         {
             Directory.CreateDirectory(SettingsStore.DataDirectory);
             var recovery = new NodeTestRecoveryState(
-                _mihomoClient.Endpoint, _nodeTestGroup, _nodeBeforeTest);
+                _mihomoClient.Endpoint,
+                _nodeTestGroup,
+                _nodeBeforeTest,
+                _modeBeforeNodeTest ?? "");
             await File.WriteAllTextAsync(
                 _nodeRecoveryPath, JsonSerializer.Serialize(recovery));
         }
@@ -1627,6 +1645,8 @@ public partial class MainWindow : Window
                     StringComparison.OrdinalIgnoreCase))
                 return;
             await _mihomoClient.SelectProxyAsync(recovery.Group, recovery.Node);
+            if (!string.IsNullOrWhiteSpace(recovery.Mode))
+                await _mihomoClient.SetModeAsync(recovery.Mode);
             File.Delete(_nodeRecoveryPath);
             NodeTestStatusText.Text =
                 $"已恢复上次意外中断前使用的节点：{recovery.Node}";
@@ -1646,6 +1666,10 @@ public partial class MainWindow : Window
         {
             await _mihomoClient.SelectProxyAsync(
                 _nodeTestGroup, _nodeBeforeTest, CancellationToken.None);
+            if (!string.IsNullOrWhiteSpace(_modeBeforeNodeTest))
+                await _mihomoClient.SetModeAsync(
+                    _modeBeforeNodeTest,
+                    CancellationToken.None);
             if (File.Exists(_nodeRecoveryPath)) File.Delete(_nodeRecoveryPath);
             _clashState = await _mihomoClient.GetStateAsync();
         }
@@ -1658,7 +1682,41 @@ public partial class MainWindow : Window
         {
             _nodeTestGroup = null;
             _nodeBeforeTest = null;
+            _modeBeforeNodeTest = null;
         }
+    }
+
+    private string ResolveNodeTestRouteGroup(
+        string selectedGroup,
+        IEnumerable<string> nodeNames)
+    {
+        if (_clashState is not null
+            && _clashState.Proxies.TryGetValue("GLOBAL", out var global)
+            && global.Type.Equals("Selector", StringComparison.OrdinalIgnoreCase))
+        {
+            var available = global.All.ToHashSet(StringComparer.Ordinal);
+            if (nodeNames.All(available.Contains))
+                return global.Name;
+        }
+        return selectedGroup;
+    }
+
+    private async Task BeginNodeTestRoutingAsync(
+        string routeGroup,
+        CancellationToken cancellationToken)
+    {
+        if (_mihomoClient is null || _clashState is null
+            || !_clashState.Proxies.TryGetValue(routeGroup, out var currentGroup))
+            throw new InvalidOperationException("所选策略组已经不存在，请重新连接 Clash。");
+
+        _nodeTestGroup = routeGroup;
+        _nodeBeforeTest = currentGroup.Now;
+        _modeBeforeNodeTest = _clashState.Mode;
+        await SaveNodeTestRecoveryAsync();
+
+        if (routeGroup.Equals("GLOBAL", StringComparison.OrdinalIgnoreCase)
+            && !_clashState.Mode.Equals("global", StringComparison.OrdinalIgnoreCase))
+            await _mihomoClient.SetModeAsync("global", cancellationToken);
     }
 
     private void RunOnUi(Action action)

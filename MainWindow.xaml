@@ -199,7 +199,7 @@
                         <TextBlock Text="当前画廊节点实测" FontSize="17" FontWeight="SemiBold"/>
                         <TextBlock x:Name="NodeTestStatusText" Margin="0,4,0,0"
                                    Foreground="{StaticResource SubTextBrush}"
-                                   Text="使用当前画廊的真实图片服务器测试；稳定完整传输优先，速度其次。"/>
+                                   Text="先排除断线节点，再真实读取当前画廊图片；稳定完整传输优先，速度其次。"/>
                     </StackPanel>
                     <Button Grid.Column="1" Content="收起" Padding="11,5" MinHeight="30"
                             Click="CloseNodeTestButton_Click"/>
@@ -223,7 +223,7 @@
                                Text="正在连接 Clash…"/>
                     <ComboBox x:Name="NodeTestModeComboBox" Grid.Column="2"
                               Width="175" Margin="0,0,8,0" SelectedIndex="0"
-                              ToolTip="智能模式只真实测速筛选后的约25个候选；完整模式真实测速所有通过快速筛选的节点。">
+                              ToolTip="智能模式优先覆盖不同地区，只真实测速筛选后的约15个候选；完整模式真实测速所有通过快速筛选的节点。">
                         <ComboBoxItem Content="智能快速筛选（推荐）" Tag="smart"/>
                         <ComboBoxItem Content="检测全部可用节点" Tag="all"/>
                     </ComboBox>
@@ -250,13 +250,13 @@
                         <DataGridTextColumn Header="节点" Binding="{Binding Name}" Width="*"/>
                         <DataGridTextColumn Header="类型" Binding="{Binding Type}" Width="105"/>
                         <DataGridTextColumn Header="Clash延迟" Binding="{Binding ClashDelayText}" Width="90"/>
-                        <DataGridTextColumn Header="画廊连通" Binding="{Binding GalleryDelayText}" Width="90"/>
                         <DataGridTextColumn Header="传输成功" Binding="{Binding SuccessText}" Width="95"/>
                         <DataGridTextColumn Header="中断" Binding="{Binding Interruptions}" Width="65"/>
                         <DataGridTextColumn Header="实际速度" Binding="{Binding SpeedText}" Width="110"/>
                         <DataGridTextColumn Header="测试流量" Binding="{Binding DownloadedText}" Width="95"/>
                         <DataGridTextColumn Header="评价" Binding="{Binding Rating}" Width="115"/>
-                        <DataGridTextColumn Header="状态/说明" Binding="{Binding Status}" Width="220"/>
+                        <DataGridTextColumn Header="状态" Binding="{Binding Status}" Width="185"/>
+                        <DataGridTextColumn Header="详细说明" Binding="{Binding Details}" Width="360"/>
                     </DataGrid.Columns>
                 </DataGrid>
             </Grid>

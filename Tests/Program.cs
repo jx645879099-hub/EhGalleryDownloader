@@ -72,16 +72,42 @@ var allCandidates = NodeScreeningLogic.SelectForRealTest(
     screeningInput,
     testAllReachable: true);
 if (smartCandidates.Count != NodeScreeningLogic.DefaultSmartLimit
-    || allCandidates.Count != 38
-    || smartCandidates.Any(result => result.ClashDelayMs <= 0 || result.GalleryDelayMs <= 0)
-    || smartCandidates.Max(result => result.GalleryDelayMs)
-       <= smartCandidates.OrderBy(result => result.GalleryDelayMs)
-           .Take(20).Max(result => result.GalleryDelayMs))
+    || allCandidates.Count != 39
+    || smartCandidates.Any(result => result.ClashDelayMs <= 0)
+    || !smartCandidates.Any(result => result.Name == "node-39")
+    || smartCandidates.Max(result => result.ClashDelayMs)
+       <= smartCandidates.OrderBy(result => result.ClashDelayMs)
+           .Take(13).Max(result => result.ClashDelayMs))
 {
-    Console.Error.WriteLine("FAIL: smart screening did not remove errors or retain broad samples.");
+    Console.Error.WriteLine(
+        "FAIL: smart screening did not remove Clash errors or retain broad high-latency samples.");
     return 16;
 }
-Console.WriteLine("PASS: smart screening removes Error nodes and limits real downloads without using latency alone.");
+Console.WriteLine(
+    "PASS: smart screening only removes Clash errors and keeps broad candidates for real downloads.");
+
+var regionalCandidates = NodeScreeningLogic.SelectForRealTest(
+[
+    new NodeProbeResult { Name = "🇯🇵日本01", Type = "VLESS", ClashDelayMs = 50 },
+    new NodeProbeResult { Name = "🇯🇵日本02", Type = "VLESS", ClashDelayMs = 55 },
+    new NodeProbeResult { Name = "🇸🇬新加坡01", Type = "VLESS", ClashDelayMs = 80 },
+    new NodeProbeResult { Name = "🇺🇸美国01", Type = "VLESS", ClashDelayMs = 120 },
+    new NodeProbeResult { Name = "🇩🇪德国01", Type = "VLESS", ClashDelayMs = 180 },
+    new NodeProbeResult { Name = "🇬🇧英国01", Type = "VLESS", ClashDelayMs = 190 },
+    new NodeProbeResult { Name = "🇯🇵日本03", Type = "VLESS", ClashDelayMs = 60 },
+    new NodeProbeResult { Name = "🇯🇵日本04", Type = "VLESS", ClashDelayMs = 65 }
+],
+    testAllReachable: false,
+    smartLimit: 6);
+if (regionalCandidates.Take(5)
+        .Select(result => NodeScreeningLogic.GetRegionKey(result.Name))
+        .Distinct(StringComparer.Ordinal)
+        .Count() != 5)
+{
+    Console.Error.WriteLine("FAIL: smart screening did not test regional representatives first.");
+    return 19;
+}
+Console.WriteLine("PASS: smart screening tests regional representatives before same-region duplicates.");
 
 const string continuationUrl = "https://example.invalid/g/123/token/";
 var stoppedJob = new DownloadJob
