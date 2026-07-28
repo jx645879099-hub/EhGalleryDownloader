@@ -1,0 +1,15 @@
+第三方组件说明
+==============
+
+本软件使用 gallery-dl 作为独立下载内核。
+
+gallery-dl
+  作者：Mike Fährmann 及贡献者
+  许可证：GNU General Public License v2.0
+  随附版本：1.32.8-dev:2026.07.20（官方 Windows 构建）
+  项目主页：https://codeberg.org/mikf/gallery-dl
+  文档：https://gdl-org.github.io/docs/
+  源代码：https://codeberg.org/mikf/gallery-dl
+
+gallery-dl.exe 作为独立程序随本软件分发，版权与许可证归原项目所有。
+用户可在上述源代码地址获取与所分发版本对应的完整源代码。
