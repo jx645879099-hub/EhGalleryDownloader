@@ -1,0 +1,29 @@
+# Visual Studio / .NET build outputs
+bin/
+obj/
+Tests/bin/
+Tests/obj/
+.vs/
+TestResults/
+*.user
+*.suo
+
+# Published applications and downloaded third-party binaries
+dist/
+tools/
+
+# Local integration output
+integration-output/
+
+# Runtime state and sensitive local data
+*.log
+login-cookie.dat
+settings.json
+run-*.json
+probe-*.json
+node-test-recovery.json
+download-archive*
+
+# Temporary files
+*.tmp
+*.update.exe
