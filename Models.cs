@@ -14,27 +14,50 @@ public sealed class DownloadJob : INotifyPropertyChanged
     private DateTime? _finishedAt;
     private DateTime _attemptStartedAt = DateTime.Now;
     private int _attemptCount;
+    private int _totalFiles;
+    private double _speedMbPerSecond;
+    private string _estimatedRemaining = "—";
+    private string _galleryTitle = "";
 
-    public Guid Id { get; } = Guid.NewGuid();
-    public DateTime CreatedAt { get; } = DateTime.Now;
+    public Guid Id { get; init; } = Guid.NewGuid();
+    public DateTime CreatedAt { get; init; } = DateTime.Now;
     public string CreatedAtText => CreatedAt.ToString("HH:mm:ss");
     public required string Url { get; init; }
     public required string OutputDirectory { get; set; }
     public required DownloadOptions Options { get; set; }
     public string? BlockedEngineVersion { get; set; }
 
-    public string State { get => _state; set => Set(ref _state, value); }
+    public string State { get => _state; set { if (Set(ref _state, value)) NotifyProgressChanged(); } }
     public string CurrentFile { get => _currentFile; set => Set(ref _currentFile, value); }
-    public int CompletedFiles { get => _completedFiles; set { if (Set(ref _completedFiles, value)) OnPropertyChanged(nameof(ProgressText)); } }
-    public int SkippedFiles { get => _skippedFiles; set { if (Set(ref _skippedFiles, value)) OnPropertyChanged(nameof(ProgressText)); } }
-    public int FailedFiles { get => _failedFiles; set { if (Set(ref _failedFiles, value)) OnPropertyChanged(nameof(ProgressText)); } }
+    public int CompletedFiles { get => _completedFiles; set { if (Set(ref _completedFiles, value)) NotifyProgressChanged(); } }
+    public int SkippedFiles { get => _skippedFiles; set { if (Set(ref _skippedFiles, value)) NotifyProgressChanged(); } }
+    public int FailedFiles { get => _failedFiles; set { if (Set(ref _failedFiles, value)) NotifyProgressChanged(); } }
     public string Details { get => _details; set => Set(ref _details, value); }
-    public DateTime? FinishedAt { get => _finishedAt; set { if (Set(ref _finishedAt, value)) OnPropertyChanged(nameof(DurationText)); } }
-    public int AttemptCount { get => _attemptCount; private set => Set(ref _attemptCount, value); }
+    public DateTime? FinishedAt { get => _finishedAt; set { if (Set(ref _finishedAt, value)) { OnPropertyChanged(nameof(DurationText)); OnPropertyChanged(nameof(FinishedAtText)); } } }
+    public int AttemptCount { get => _attemptCount; set => Set(ref _attemptCount, value); }
+    public int TotalFiles { get => _totalFiles; set { if (Set(ref _totalFiles, value)) NotifyProgressChanged(); } }
+    public double SpeedMbPerSecond { get => _speedMbPerSecond; set { if (Set(ref _speedMbPerSecond, value)) OnPropertyChanged(nameof(SpeedText)); } }
+    public string EstimatedRemaining { get => _estimatedRemaining; set => Set(ref _estimatedRemaining, value); }
+    public string GalleryTitle { get => _galleryTitle; set { if (Set(ref _galleryTitle, value)) OnPropertyChanged(nameof(GalleryDisplayName)); } }
 
-    public string ProgressText => CompletedFiles == 0 && SkippedFiles == 0 && FailedFiles == 0
-        ? "—"
+    public string ProgressText => TotalFiles > 0
+        ? $"{CompletedFiles + SkippedFiles} / {TotalFiles} 张 · {ProgressPercent:F0}%"
+        : CompletedFiles == 0 && SkippedFiles == 0 && FailedFiles == 0
+        ? State switch
+        {
+            "已停止" => "等待继续",
+            "排队中" or "等待" => "等待开始",
+            "失败" => "未完成",
+            _ => "正在准备"
+        }
         : $"{CompletedFiles} 完成 / {SkippedFiles} 已有 / {FailedFiles} 失败";
+    public double ProgressPercent => TotalFiles > 0
+        ? Math.Clamp((CompletedFiles + SkippedFiles) * 100d / TotalFiles, 0, 100)
+        : 0;
+    public bool HasProgress => TotalFiles > 0;
+    public string SpeedText => SpeedMbPerSecond > 0
+        ? $"{SpeedMbPerSecond:F2} MB/s"
+        : "—";
 
     public string DurationText
     {
@@ -54,6 +77,9 @@ public sealed class DownloadJob : INotifyPropertyChanged
         CompletedFiles = 0;
         SkippedFiles = 0;
         FailedFiles = 0;
+        TotalFiles = 0;
+        SpeedMbPerSecond = 0;
+        EstimatedRemaining = "—";
         CurrentFile = "—";
         OnPropertyChanged(nameof(DurationText));
     }
@@ -66,6 +92,49 @@ public sealed class DownloadJob : INotifyPropertyChanged
         field = value;
         OnPropertyChanged(name);
         return true;
+    }
+
+    public string GalleryDisplayName
+    {
+        get
+        {
+            if (!string.IsNullOrWhiteSpace(GalleryTitle)) return GalleryTitle;
+            if (!Uri.TryCreate(Url, UriKind.Absolute, out var uri)) return "画廊任务";
+            var segments = uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            var galleryIndex = Array.FindIndex(segments,
+                segment => segment.Equals("g", StringComparison.OrdinalIgnoreCase));
+            return galleryIndex >= 0 && galleryIndex + 1 < segments.Length
+                ? $"画廊 {segments[galleryIndex + 1]}"
+                : uri.Host;
+        }
+    }
+
+    public string SourceLabel => Uri.TryCreate(Url, UriKind.Absolute, out var uri)
+        && uri.Host.Contains("exhentai", StringComparison.OrdinalIgnoreCase)
+            ? "ExHentai"
+            : "E-Hentai";
+
+    public string SourceSummary
+    {
+        get
+        {
+            if (!Uri.TryCreate(Url, UriKind.Absolute, out var uri)) return SourceLabel;
+            var parts = uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            var galleryIndex = Array.FindIndex(parts,
+                part => part.Equals("g", StringComparison.OrdinalIgnoreCase));
+            return galleryIndex >= 0 && galleryIndex + 1 < parts.Length
+                ? $"{SourceLabel} · 画廊 {parts[galleryIndex + 1]}"
+                : SourceLabel;
+        }
+    }
+
+    public string FinishedAtText => FinishedAt?.ToString("yyyy-MM-dd HH:mm") ?? "—";
+
+    private void NotifyProgressChanged()
+    {
+        OnPropertyChanged(nameof(ProgressText));
+        OnPropertyChanged(nameof(ProgressPercent));
+        OnPropertyChanged(nameof(HasProgress));
     }
 
     private void OnPropertyChanged([CallerMemberName] string? name = null) =>
@@ -100,7 +169,17 @@ public sealed class AppSettings
     public bool PackageAsCbz { get; set; }
     public bool WriteMetadata { get; set; } = true;
     public bool ForceIpv4 { get; set; } = true;
+    public bool AutoFailover { get; set; } = true;
+    public int AutoFailoverLimit { get; set; } = 3;
+    public int UiScalePercent { get; set; } = 110;
+    public DateTime? LastCookieVerifiedAt { get; set; }
 }
+
+public sealed record DownloadProgress(
+    int Current,
+    int Total,
+    double SpeedMbPerSecond,
+    TimeSpan? EstimatedRemaining);
 
 public sealed class ProxyInfo
 {

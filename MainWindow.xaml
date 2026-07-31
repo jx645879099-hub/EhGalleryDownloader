@@ -1,333 +1,556 @@
 <Window x:Class="EhGalleryDownloader.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="画廊下载助手" Height="960" Width="1360"
-        MinHeight="720" MinWidth="1080"
+        Title="画廊下载助手" Height="940" Width="1560"
+        MinHeight="760" MinWidth="1180"
         WindowStartupLocation="CenterScreen">
-    <Grid Margin="22">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-        </Grid.RowDefinitions>
+    <Window.Resources>
+        <Style x:Key="CardStyle" TargetType="Border">
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="BorderBrush" Value="#E1E7F0"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="14"/>
+            <Setter Property="Effect">
+                <Setter.Value><DropShadowEffect BlurRadius="16" ShadowDepth="2" Opacity="0.055" Color="#233451"/></Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="SideNavButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="#AFBCD0"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+            <Setter Property="Padding" Value="17,12"/>
+            <Setter Property="Margin" Value="0,0,0,5"/>
+            <Setter Property="FontSize" Value="{DynamicResource FontNavSize}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="NavBorder" Background="{TemplateBinding Background}" CornerRadius="8"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="Center"
+                                              TextElement.Foreground="{TemplateBinding Foreground}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="NavBorder" Property="Background" Value="#21314B"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="SettingsTabItem" TargetType="TabItem">
+            <Setter Property="Width" Value="192"/>
+            <Setter Property="Padding" Value="16,13"/>
+            <Setter Property="Margin" Value="0,0,14,7"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="HorizontalAlignment" Value="Stretch"/>
+            <Setter Property="Foreground" Value="#586A82"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabItem">
+                        <Border x:Name="TabBorder" Background="Transparent" CornerRadius="9"
+                                Padding="{TemplateBinding Padding}">
+                            <Grid>
+                                <Border x:Name="Indicator" Width="3" Height="20" Background="{StaticResource AccentBrush}"
+                                        CornerRadius="2" HorizontalAlignment="Left" Visibility="Collapsed"/>
+                                <ContentPresenter Margin="10,0,0,0" VerticalAlignment="Center" ContentSource="Header"/>
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="TabBorder" Property="Background" Value="#EEF3FA"/></Trigger>
+                            <Trigger Property="IsSelected" Value="True"><Setter TargetName="TabBorder" Property="Background" Value="#E8F0FF"/><Setter TargetName="Indicator" Property="Visibility" Value="Visible"/><Setter Property="Foreground" Value="#245BCB"/><Setter Property="FontWeight" Value="SemiBold"/></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="SettingRow" TargetType="Border">
+            <Setter Property="BorderBrush" Value="#E9EDF3"/>
+            <Setter Property="BorderThickness" Value="0,0,0,1"/>
+            <Setter Property="Padding" Value="25,18"/>
+        </Style>
+    </Window.Resources>
 
-        <Grid Grid.Row="0" Margin="2,0,2,16">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="Auto"/>
-            </Grid.ColumnDefinitions>
-            <StackPanel>
-                <TextBlock Text="画廊下载助手" FontSize="27" FontWeight="Bold"/>
-                <TextBlock Margin="0,5,0,0" Foreground="{StaticResource SubTextBrush}"
-                           Text="中文外壳 · gallery-dl 下载内核 · 自动经 Clash 下载 · 关闭后下次可继续"/>
-            </StackPanel>
-            <Border Grid.Column="1" Background="White" BorderBrush="{StaticResource BorderBrush}"
-                    BorderThickness="1" CornerRadius="20" Padding="16,9">
-                <StackPanel Orientation="Horizontal">
-                    <Ellipse x:Name="EngineDot" Width="9" Height="9" Fill="{StaticResource WarningBrush}" Margin="0,0,8,0"/>
-                    <TextBlock x:Name="EngineStatusText" Text="正在检查内核…" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                    <Button x:Name="InstallEngineButton" Content="检查更新" Margin="14,-4,-8,-4"
-                            Padding="10,4" MinHeight="28" Click="InstallEngineButton_Click"/>
-                </StackPanel>
-            </Border>
-        </Grid>
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="230"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
 
-        <Border Grid.Row="1" Background="White" BorderBrush="{StaticResource BorderBrush}"
-                BorderThickness="1" CornerRadius="9" Padding="16" Margin="0,0,0,13">
-            <Grid>
+        <Border Grid.Column="0" Background="#17243B">
+            <Grid Margin="17,24,17,18">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
-                </Grid.RowDefinitions>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-                <Label Grid.Row="0" Content="画廊链接（支持一次粘贴一条；结束后可继续粘贴下一条）"/>
-                <TextBox x:Name="UrlTextBox" Grid.Row="1" AcceptsReturn="True" Height="58"
-                         VerticalContentAlignment="Center" FontSize="15"
-                         ToolTip="例如：https://e-hentai.org/g/数字/令牌/"/>
-                <Button Grid.Row="1" Grid.Column="1" Content="粘贴" Width="88" Margin="10,0,0,0"
-                        Click="PasteButton_Click"/>
-            </Grid>
-        </Border>
-
-        <Border Grid.Row="2" Background="White" BorderBrush="{StaticResource BorderBrush}"
-                BorderThickness="1" CornerRadius="9" Padding="16" Margin="0,0,0,13">
-            <Grid>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
                     <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="1.7*"/>
-                    <ColumnDefinition Width="1.05*"/>
-                    <ColumnDefinition Width="0.95*"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-
-                <Label Grid.Row="0" Grid.Column="0" Content="保存位置"/>
-                <Label Grid.Row="0" Grid.Column="1" Content="登录方式"/>
-                <Label Grid.Row="0" Grid.Column="2" Content="图片质量"/>
-
-                <Grid Grid.Row="1" Grid.Column="0" Margin="0,0,12,0">
+                <Grid Margin="7,0,7,24">
                     <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="42"/>
                         <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
-                    <TextBox x:Name="OutputPathTextBox"/>
-                    <Button Grid.Column="1" Content="选择…" Margin="8,0,0,0" Padding="12,7" Click="BrowseButton_Click"/>
+                    <Border Width="38" Height="38" Background="#4C75EF" CornerRadius="10">
+                        <TextBlock Text="廊" Foreground="White" FontWeight="Bold" FontSize="18"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="8,0,0,0">
+                        <TextBlock Text="画廊下载助手" Foreground="White" FontWeight="SemiBold" FontSize="{DynamicResource FontNavSize}"/>
+                        <TextBlock Text="Gallery Assistant" Foreground="#9BABC1" FontSize="{DynamicResource FontCaptionSize}" Margin="0,2,0,0"/>
+                    </StackPanel>
                 </Grid>
-
-                <ComboBox x:Name="LoginModeComboBox" Grid.Row="1" Grid.Column="1" Margin="0,0,12,0"
-                          SelectionChanged="LoginModeComboBox_SelectionChanged">
-                    <ComboBoxItem Content="手动粘贴 Cookie（推荐）" Tag="manual"/>
-                    <ComboBoxItem Content="从已关闭的 Edge 读取" Tag="edge"/>
-                    <ComboBoxItem Content="从已关闭的 Chrome 读取" Tag="chrome"/>
-                    <ComboBoxItem Content="从已关闭的 Firefox 读取" Tag="firefox"/>
-                    <ComboBoxItem Content="不登录（仅公开画廊）" Tag="none"/>
-                </ComboBox>
-
-                <ComboBox x:Name="QualityComboBox" Grid.Row="1" Grid.Column="2" Margin="0,0,12,0">
-                    <ComboBoxItem Content="原图（清晰，流量较多）" Tag="original"/>
-                    <ComboBoxItem Content="网站压缩图（更省流量）" Tag="resized"/>
-                </ComboBox>
-
-                <Button x:Name="StartButton" Grid.Row="1" Grid.Column="3" Content="开始下载"
-                        Width="125" Style="{StaticResource PrimaryButton}" Click="StartButton_Click"/>
-
-                <WrapPanel Grid.Row="2" Grid.ColumnSpan="4" Margin="0,15,0,0">
-                    <CheckBox x:Name="UseProxyCheckBox" Content="使用 Clash 代理" IsChecked="True"/>
-                    <TextBox x:Name="ProxyTextBox" Width="190" Margin="8,0,10,0" Text="http://127.0.0.1:7897"/>
-                    <CheckBox x:Name="AutoDetectProxyCheckBox"
-                              Content="自动识别端口（推荐）" IsChecked="True"
-                              Margin="0,0,10,0"
-                              Checked="AutoDetectProxyCheckBox_Changed"
-                              Unchecked="AutoDetectProxyCheckBox_Changed"
-                              ToolTip="从 Clash Verge 的 Mihomo 控制接口读取当前 mixed-port；失败时保留手动地址。"/>
-                    <TextBlock x:Name="ProxyDetectionStatusText"
-                               VerticalAlignment="Center" Margin="0,0,22,0"
-                               Foreground="{StaticResource SubTextBrush}"
-                               Text="等待识别"/>
-                    <CheckBox x:Name="ForceIpv4CheckBox" Content="优先 IPv4（更稳）" IsChecked="True" Margin="0,0,22,0"/>
-                    <CheckBox x:Name="MetadataCheckBox" Content="保存画廊信息" IsChecked="True" Margin="0,0,22,0"/>
-                    <CheckBox x:Name="CbzCheckBox" Content="打包为 CBZ（适合漫画阅读器）"/>
-                    <Button x:Name="OpenNodeTestButton" Content="为当前画廊挑节点"
-                            Margin="24,-5,0,-5" Padding="13,5"
-                            Click="OpenNodeTestButton_Click"/>
-                </WrapPanel>
-
-                <Border x:Name="ManualCookiePanel" Grid.Row="3" Grid.ColumnSpan="4"
-                        Background="#F8FAFC" BorderBrush="{StaticResource BorderBrush}"
-                        BorderThickness="1" CornerRadius="7" Padding="12" Margin="0,13,0,0">
-                    <Grid>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                        </Grid.RowDefinitions>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-
-                        <TextBlock Grid.Row="0" Grid.ColumnSpan="4" Margin="0,0,0,7"
-                                   Foreground="{StaticResource SubTextBrush}"
-                                   Text="登录 Cookie：粘贴 Chrome 开发者工具 Request Headers 中 Cookie: 后面的完整内容。Cookie 等同临时密码，请勿发给别人。"/>
-
-                        <Grid Grid.Row="1">
-                            <PasswordBox x:Name="CookiePasswordBox" PasswordChar="●"
-                                         PasswordChanged="CookiePasswordBox_PasswordChanged"
-                                         ToolTip="支持直接粘贴 name=value; name2=value2"/>
-                            <TextBox x:Name="CookieVisibleTextBox" Visibility="Collapsed"
-                                     TextChanged="CookieVisibleTextBox_TextChanged"
-                                     ToolTip="支持直接粘贴 name=value; name2=value2"/>
-                        </Grid>
-                        <Button x:Name="ToggleCookieButton" Grid.Row="1" Grid.Column="1"
-                                Content="显示" Margin="8,0,0,0" Padding="12,7"
-                                Click="ToggleCookieButton_Click"/>
-                        <Button x:Name="VerifyCookieButton" Grid.Row="1" Grid.Column="2"
-                                Content="验证登录" Margin="8,0,0,0" Padding="12,7"
-                                Click="VerifyCookieButton_Click"/>
-                        <Button Grid.Row="1" Grid.Column="3" Content="清除"
-                                Margin="8,0,0,0" Padding="12,7"
-                                Click="ClearCookieButton_Click"/>
-
-                        <Grid Grid.Row="2" Grid.ColumnSpan="4" Margin="0,9,0,0">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <CheckBox x:Name="RememberCookieCheckBox"
-                                      Content="自动加密保存（关闭或升级不会丢失）"
-                                      Checked="RememberCookieCheckBox_Changed"
-                                      Unchecked="RememberCookieCheckBox_Changed"/>
-                            <TextBlock x:Name="CookieStatusText" Grid.Column="1"
-                                       Margin="16,0,0,0" TextWrapping="Wrap"
-                                       Foreground="{StaticResource SubTextBrush}"
-                                       Text="尚未验证"/>
-                        </Grid>
-                    </Grid>
+                <Border Grid.Row="1" Height="1" Background="#18FFFFFF" Margin="0,0,0,20"/>
+                <StackPanel Grid.Row="2">
+                    <Button x:Name="DownloadNavButton" Style="{StaticResource SideNavButton}"
+                            Background="#2A3B58" Click="DownloadNavButton_Click">
+                        <StackPanel Orientation="Horizontal"><TextBlock x:Name="DownloadNavGlyph" Text="↓" Width="34" Foreground="White" FontSize="19"/><TextBlock x:Name="DownloadNavText" Text="下载" Foreground="White" VerticalAlignment="Center"/></StackPanel>
+                    </Button>
+                    <Button x:Name="HistoryNavButton" Style="{StaticResource SideNavButton}" Click="HistoryNavButton_Click">
+                        <StackPanel Orientation="Horizontal"><TextBlock x:Name="HistoryNavGlyph" Text="▣" Width="34" Foreground="#AFBCD0" FontSize="17"/><TextBlock x:Name="HistoryNavText" Text="下载记录" Foreground="#AFBCD0" VerticalAlignment="Center"/></StackPanel>
+                    </Button>
+                    <Button x:Name="NodeNavButton" Style="{StaticResource SideNavButton}" Click="NodeNavButton_Click">
+                        <StackPanel Orientation="Horizontal"><TextBlock x:Name="NodeNavGlyph" Text="⌁" Width="34" Foreground="#AFBCD0" FontSize="19"/><TextBlock x:Name="NodeNavText" Text="连接诊断" Foreground="#AFBCD0" VerticalAlignment="Center"/></StackPanel>
+                    </Button>
+                    <Button x:Name="SettingsNavButton" Style="{StaticResource SideNavButton}" Click="SettingsNavButton_Click">
+                        <StackPanel Orientation="Horizontal"><TextBlock x:Name="SettingsNavGlyph" Text="⚙" Width="34" Foreground="#AFBCD0" FontSize="17"/><TextBlock x:Name="SettingsNavText" Text="设置" Foreground="#AFBCD0" VerticalAlignment="Center"/></StackPanel>
+                    </Button>
+                </StackPanel>
+                <Border Grid.Row="3" Background="#20304A" BorderBrush="#31415D" BorderThickness="1"
+                        CornerRadius="9" Padding="14,12">
+                    <StackPanel>
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse Width="7" Height="7" Fill="#19BA83" Margin="0,0,7,0"/>
+                            <TextBlock Text="运行正常" Foreground="#C2CDDD" FontSize="{DynamicResource FontBodySize}"/>
+                        </StackPanel>
+                        <TextBlock Text="v1.1.0 · 本地运行" Foreground="#94A4BA" FontSize="{DynamicResource FontCaptionSize}" Margin="0,6,0,0"/>
+                    </StackPanel>
                 </Border>
             </Grid>
         </Border>
 
-        <Border x:Name="NodeTestPanel" Grid.Row="3" Visibility="Collapsed"
-                Background="White" BorderBrush="{StaticResource BorderBrush}"
-                BorderThickness="1" CornerRadius="9" Padding="14" Margin="0,0,0,13">
-            <Grid>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="150"/>
-                </Grid.RowDefinitions>
-
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-                    <StackPanel>
-                        <TextBlock Text="当前画廊节点实测" FontSize="17" FontWeight="SemiBold"/>
-                        <TextBlock x:Name="NodeTestStatusText" Margin="0,4,0,0"
-                                   Foreground="{StaticResource SubTextBrush}"
-                                   Text="先排除断线节点，再真实读取当前画廊图片；稳定完整传输优先，速度其次。"/>
-                    </StackPanel>
-                    <Button Grid.Column="1" Content="收起" Padding="11,5" MinHeight="30"
-                            Click="CloseNodeTestButton_Click"/>
-                </Grid>
-
-                <Grid Grid.Row="1" Margin="0,11,0,9">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="270"/>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-                    <ComboBox x:Name="NodeGroupComboBox" DisplayMemberPath="Name"
-                              SelectionChanged="NodeGroupComboBox_SelectionChanged"
-                              ToolTip="选择实际控制画廊下载流量的策略组，通常是你平时手动切换节点的那一组。"/>
-                    <TextBlock x:Name="NodeCandidateText" Grid.Column="1" Margin="12,0"
-                               VerticalAlignment="Center" Foreground="{StaticResource SubTextBrush}"
-                               Text="正在连接 Clash…"/>
-                    <ComboBox x:Name="NodeTestModeComboBox" Grid.Column="2"
-                              Width="175" Margin="0,0,8,0" SelectedIndex="0"
-                              ToolTip="智能模式优先覆盖不同地区，只真实测速筛选后的约15个候选；完整模式真实测速所有通过快速筛选的节点。">
-                        <ComboBoxItem Content="智能快速筛选（推荐）" Tag="smart"/>
-                        <ComboBoxItem Content="检测全部可用节点" Tag="all"/>
-                    </ComboBox>
-                    <Button x:Name="QuickNodeTestButton" Grid.Column="3" Content="开始筛选测速"
-                            IsEnabled="False" Margin="0,0,8,0" Padding="13,6"
-                            Style="{StaticResource PrimaryButton}" Click="QuickNodeTestButton_Click"/>
-                    <Button x:Name="PreciseNodeTestButton" Grid.Column="4" Content="精确复测前5名"
-                            IsEnabled="False" Margin="0,0,8,0" Padding="13,6"
-                            Click="PreciseNodeTestButton_Click"/>
-                    <Button x:Name="StopNodeTestButton" Grid.Column="5" Content="停止测试"
-                            IsEnabled="False" Margin="0,0,8,0" Padding="13,6"
-                            Style="{StaticResource DangerButton}" Click="StopNodeTestButton_Click"/>
-                    <Button x:Name="UseTestedNodeButton" Grid.Column="6" Content="使用选中节点"
-                            IsEnabled="False" Padding="13,6" Click="UseTestedNodeButton_Click"/>
-                </Grid>
-
-                <DataGrid x:Name="NodeResultsGrid" Grid.Row="2"
-                          ItemsSource="{Binding NodeResults}"
-                          SelectionChanged="NodeResultsGrid_SelectionChanged"
-                          ScrollViewer.VerticalScrollBarVisibility="Auto"
-                          ScrollViewer.HorizontalScrollBarVisibility="Auto">
-                    <DataGrid.Columns>
-                        <DataGridTextColumn Header="#" Binding="{Binding RankText}" Width="45"/>
-                        <DataGridTextColumn Header="节点" Binding="{Binding Name}" Width="*"/>
-                        <DataGridTextColumn Header="类型" Binding="{Binding Type}" Width="105"/>
-                        <DataGridTextColumn Header="Clash延迟" Binding="{Binding ClashDelayText}" Width="90"/>
-                        <DataGridTextColumn Header="传输成功" Binding="{Binding SuccessText}" Width="95"/>
-                        <DataGridTextColumn Header="中断" Binding="{Binding Interruptions}" Width="65"/>
-                        <DataGridTextColumn Header="实际速度" Binding="{Binding SpeedText}" Width="110"/>
-                        <DataGridTextColumn Header="测试流量" Binding="{Binding DownloadedText}" Width="95"/>
-                        <DataGridTextColumn Header="评价" Binding="{Binding Rating}" Width="115"/>
-                        <DataGridTextColumn Header="状态" Binding="{Binding Status}" Width="185"/>
-                        <DataGridTextColumn Header="详细说明" Binding="{Binding Details}" Width="360"/>
-                    </DataGrid.Columns>
-                </DataGrid>
-            </Grid>
-        </Border>
-
-        <Grid Grid.Row="4">
+        <Grid Grid.Column="1">
             <Grid.RowDefinitions>
-                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="92"/>
                 <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
-            <Grid Margin="2,0,2,8">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-                <TextBlock Text="下载任务" FontSize="17" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                <StackPanel Grid.Column="1" Orientation="Horizontal">
-                    <Button x:Name="StopButton" Content="停止当前任务" Style="{StaticResource DangerButton}"
-                            IsEnabled="False" Margin="0,0,8,0" Click="StopButton_Click"/>
-                    <Button x:Name="RetryButton" Content="继续 / 补漏选中任务" IsEnabled="False"
-                            Margin="0,0,8,0" Click="RetryButton_Click"/>
-                    <Button Content="打开保存位置" Click="OpenFolderButton_Click"/>
-                </StackPanel>
-            </Grid>
 
-            <DataGrid x:Name="JobsGrid" Grid.Row="1" ItemsSource="{Binding Jobs}"
-                      SelectionChanged="JobsGrid_SelectionChanged"
-                      ScrollViewer.HorizontalScrollBarVisibility="Auto"
-                      ScrollViewer.VerticalScrollBarVisibility="Auto"
-                      FrozenColumnCount="2">
-                <DataGrid.Columns>
-                    <DataGridTextColumn Header="时间" Binding="{Binding CreatedAtText}" Width="78"/>
-                    <DataGridTextColumn Header="状态" Binding="{Binding State}" Width="92"/>
-                    <DataGridTextColumn Header="进度" Binding="{Binding ProgressText}" Width="210"/>
-                    <DataGridTextColumn Header="当前文件" Binding="{Binding CurrentFile}" Width="220"/>
-                    <DataGridTextColumn Header="用时" Binding="{Binding DurationText}" Width="78"/>
-                    <DataGridTextColumn Header="画廊链接" Binding="{Binding Url}" Width="430"/>
-                    <DataGridTextColumn Header="保存位置" Binding="{Binding OutputDirectory}" Width="360"/>
-                </DataGrid.Columns>
-            </DataGrid>
-        </Grid>
+            <Border Background="White" BorderBrush="#E1E7F0" BorderThickness="0,0,0,1">
+                <Grid Margin="30,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock x:Name="PageTitleText" Text="下载" FontSize="{DynamicResource FontPageTitleSize}" FontWeight="SemiBold"/>
+                        <TextBlock x:Name="PageSubtitleText" Text="粘贴画廊链接，就可以开始" FontSize="{DynamicResource FontCaptionSize}"
+                                   Foreground="{StaticResource SubTextBrush}" Margin="0,5,0,0"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Border Background="White" BorderBrush="#DDE4EE" BorderThickness="1" CornerRadius="17" Padding="11,7">
+                            <StackPanel Orientation="Horizontal">
+                                <Ellipse x:Name="EngineDot" Width="8" Height="8" Fill="{StaticResource WarningBrush}" Margin="0,0,7,0"/>
+                                <TextBlock x:Name="EngineStatusText" Text="正在检查内核…" FontSize="{DynamicResource FontCaptionSize}" FontWeight="SemiBold"/>
+                            </StackPanel>
+                        </Border>
+                        <Button x:Name="InstallEngineButton" Content="检查内核" Margin="8,0,0,0" Padding="10,5"
+                                MinHeight="32" Click="InstallEngineButton_Click"/>
+                        <Button x:Name="AppUpdateButton" Content="软件更新" Margin="8,0,0,0" Padding="10,5"
+                                MinHeight="32" Click="AppUpdateButton_Click"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
 
-        <Border Grid.Row="5" Background="White" BorderBrush="{StaticResource BorderBrush}"
-                BorderThickness="1" CornerRadius="8" Padding="13" Margin="0,12,0,9">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-                <TextBlock Text="详细说明：" FontWeight="SemiBold" Margin="0,1,8,0"/>
-                <TextBox x:Name="DetailsTextBox" Grid.Column="1" IsReadOnly="True"
-                         BorderThickness="0" Padding="0" MinHeight="24" MaxHeight="68"
-                         TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
-                         Background="Transparent" Text="选中一条任务后，这里会显示详细状态和中文错误说明。"/>
-                <Button Grid.Column="2" Content="复制说明" Margin="12,0,0,0" Padding="11,5"
-                        MinHeight="30" Click="CopyDetailsButton_Click"/>
-            </Grid>
-        </Border>
+            <TabControl x:Name="MainNavigationTabControl" Grid.Row="1" Background="Transparent" BorderThickness="0">
+                <TabControl.ItemContainerStyle>
+                    <Style TargetType="TabItem"><Setter Property="Visibility" Value="Collapsed"/></Style>
+                </TabControl.ItemContainerStyle>
 
-        <Grid Grid.Row="6">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
-            </Grid.RowDefinitions>
-            <Grid>
-                <TextBlock x:Name="FooterStatusText" Foreground="{StaticResource SubTextBrush}"
-                           Text="准备就绪。第一次使用请确认浏览器中已经登录网站。"/>
-                <TextBlock x:Name="CountText" HorizontalAlignment="Right" Foreground="{StaticResource SubTextBrush}"/>
-            </Grid>
-            <ProgressBar x:Name="ActivityProgressBar" Grid.Row="1" Margin="0,8,0,0" IsIndeterminate="False"/>
+                <TabItem Header="下载">
+                    <Grid Margin="28,22,28,18">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*" MinHeight="190"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <Border x:Name="NewTaskCard" Style="{StaticResource CardStyle}" Padding="25,22,25,0" Margin="0,0,0,17">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <Grid>
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <StackPanel Orientation="Horizontal">
+                                        <Border Width="30" Height="30" Background="#EAF0FF" CornerRadius="15" Margin="0,0,13,0">
+                                            <TextBlock Text="1" Foreground="#4168DA" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Border>
+                                        <StackPanel>
+                                            <TextBlock Text="要下载哪个画廊？" FontSize="{DynamicResource FontCardTitleSize}" FontWeight="SemiBold"/>
+                                            <TextBlock Text="支持 E-Hentai 和 ExHentai；多个链接请每行填写一个"
+                                                       Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Margin="0,5,0,0"/>
+                                        </StackPanel>
+                                    </StackPanel>
+                                    <Button Grid.Column="1" Content="从剪贴板粘贴" Padding="12,6" MinHeight="32" Click="PasteButton_Click"/>
+                                </Grid>
+                                <TextBox x:Name="UrlTextBox" Grid.Row="1" Height="68" Margin="0,14,0,0" AcceptsReturn="True"
+                                         VerticalContentAlignment="Top" VerticalScrollBarVisibility="Auto" TextWrapping="Wrap"
+                                         Padding="11,8" ToolTip="例如：https://e-hentai.org/g/数字/令牌/"/>
+                                <Border Grid.Row="2" Height="1" Background="#E5EAF1" Margin="0,17,0,15"/>
+                                <Grid Grid.Row="3">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="42"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <Border Width="30" Height="30" Background="#EAF0FF" CornerRadius="15" HorizontalAlignment="Left">
+                                        <TextBlock Text="2" Foreground="#4168DA" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Border>
+                                    <StackPanel Grid.Column="1">
+                                        <TextBlock Text="保存到哪里？" FontWeight="SemiBold" Margin="0,0,0,7"/>
+                                        <TextBox x:Name="OutputPathTextBox" MinWidth="360"/>
+                                    </StackPanel>
+                                    <Button Grid.Column="2" Content="选择文件夹" Margin="8,25,0,0" Padding="13,6" Click="BrowseButton_Click"/>
+                                </Grid>
+                                <Grid Grid.Row="4" Margin="-25,18,-25,0" Background="#FAFBFC" Height="61">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="25,0,0,0">
+                                        <TextBlock Text="当前设置" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}"/>
+                                        <TextBlock x:Name="CurrentSettingsSummaryText" Text="原图 · 自动最佳节点 · 保存画廊信息"
+                                                   FontWeight="SemiBold" Foreground="#536075" FontSize="{DynamicResource FontCaptionSize}" Margin="9,0,0,0"/>
+                                        <Button Content="修改设置" BorderThickness="0" Background="Transparent" Foreground="#4167D6"
+                                                Padding="8,2" MinHeight="24" Click="OpenSettingsButton_Click"/>
+                                        <Button x:Name="OpenNodeTestButton" Content="节点测速" BorderThickness="0" Background="Transparent"
+                                                Foreground="#4167D6" Padding="8,2" MinHeight="24" Click="OpenNodeTestButton_Click"/>
+                                    </StackPanel>
+                                    <Button x:Name="StartButton" Grid.Column="1" Content="开始下载" Width="132" Margin="0,10,20,10"
+                                            Style="{StaticResource PrimaryButton}" Click="StartButton_Click"/>
+                                </Grid>
+                            </Grid>
+                        </Border>
+
+                        <Button x:Name="AddNewTaskCollapsedButton" Visibility="Collapsed" Margin="0,0,0,17"
+                                Height="72" HorizontalContentAlignment="Stretch" Click="AddNewTaskCollapsedButton_Click">
+                            <Grid Margin="5,0"><Grid.ColumnDefinitions><ColumnDefinition Width="44"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <Border Width="38" Height="38" Background="#EAF1FF" CornerRadius="10"><TextBlock Text="＋" Foreground="#3368E8" FontSize="22" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="12,0,0,0"><TextBlock Text="添加新的下载" FontWeight="SemiBold" FontSize="{DynamicResource FontNavSize}"/><TextBlock Text="粘贴链接并加入等待队列" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Margin="0,3,0,0"/></StackPanel>
+                                <TextBlock Grid.Column="2" Text="展开" Foreground="#4167D6" VerticalAlignment="Center" Margin="14,0,4,0"/>
+                            </Grid>
+                        </Button>
+
+                        <Border x:Name="CurrentTaskCard" Grid.Row="1" Style="{StaticResource CardStyle}" Visibility="Collapsed" Margin="0,0,0,17">
+                            <Grid>
+                                <Grid.RowDefinitions><RowDefinition Height="68"/><RowDefinition Height="Auto"/><RowDefinition Height="44"/></Grid.RowDefinitions>
+                                <Grid Margin="21,0">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center"><TextBlock Text="当前任务" FontSize="{DynamicResource FontCardTitleSize}" FontWeight="SemiBold"/><Border Background="#EAF1FF" CornerRadius="11" Padding="9,4" Margin="12,0,0,0"><TextBlock Text="{Binding State}" Foreground="#2D62D4" FontWeight="SemiBold" FontSize="{DynamicResource FontCaptionSize}"/></Border></StackPanel>
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                        <Button x:Name="StopButton" Content="停止" Style="{StaticResource DangerButton}" IsEnabled="False" Margin="0,0,8,0" Padding="14,7" Click="StopButton_Click" ToolTip="安全停止并保留已完成文件，下次可继续"/>
+                                        <Button x:Name="RetryButton" Content="继续 / 补漏" IsEnabled="False" Margin="0,0,8,0" Padding="14,7" Click="RetryButton_Click"/>
+                                        <Button x:Name="JobMoreButton" Content="•••" Width="48" Padding="10,7" Style="{StaticResource GhostButton}" Click="JobMoreButton_Click"/>
+                                        <Popup x:Name="JobMorePopup" Placement="Bottom" PlacementTarget="{Binding ElementName=JobMoreButton}"
+                                               HorizontalOffset="-166" VerticalOffset="7" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
+                                            <Border Width="214" Background="White" BorderBrush="#DDE5F0" BorderThickness="1" CornerRadius="12" Padding="7">
+                                                <Border.Effect><DropShadowEffect BlurRadius="18" ShadowDepth="5" Opacity="0.18" Color="#24344D"/></Border.Effect>
+                                                <StackPanel>
+                                                    <TextBlock Text="任务操作" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Margin="10,6,10,7"/>
+                                                    <Button Content="↑   上移选中任务" Style="{StaticResource PopupMenuButton}" Click="MoveJobUpButton_Click"/>
+                                                    <Button Content="↓   下移选中任务" Style="{StaticResource PopupMenuButton}" Click="MoveJobDownButton_Click"/>
+                                                    <Border Height="1" Background="#EDF1F6" Margin="8,5"/>
+                                                    <Button Content="移除选中任务" Style="{StaticResource PopupMenuButton}" Foreground="#A3263C" Click="RemoveSelectedJobButton_Click"/>
+                                                    <Button Content="清除已完成任务" Style="{StaticResource PopupMenuButton}" Click="ClearFinishedJobsButton_Click"/>
+                                                </StackPanel>
+                                            </Border>
+                                        </Popup>
+                                    </StackPanel>
+                                </Grid>
+                                <Grid Grid.Row="1" Margin="22,3,22,22">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="94"/><ColumnDefinition Width="*"/><ColumnDefinition Width="220"/></Grid.ColumnDefinitions>
+                                    <Border Width="86" Height="112" Background="#17243B" CornerRadius="11" HorizontalAlignment="Left" ClipToBounds="True"><Grid><Ellipse Width="90" Height="90" Fill="#3F6FE5" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="28,-35,-25,0"/><StackPanel VerticalAlignment="Bottom" Margin="13"><TextBlock Text="EH" Foreground="White" FontWeight="Bold" FontSize="16"/><TextBlock Text="GALLERY" Foreground="#AAB8CF" FontSize="10" Margin="0,5,0,0"/></StackPanel></Grid></Border>
+                                    <StackPanel Grid.Column="1" Margin="14,2,25,0">
+                                        <TextBlock Text="{Binding GalleryDisplayName}" FontSize="{DynamicResource FontCardTitleSize}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                        <TextBlock Text="{Binding SourceSummary}" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Margin="0,5,0,0"/>
+                                        <Grid Margin="0,21,0,7"><TextBlock Text="正在下载图片" FontWeight="SemiBold"/><TextBlock Text="{Binding ProgressText}" HorizontalAlignment="Right" Foreground="{StaticResource SubTextBrush}"/></Grid>
+                                        <ProgressBar Value="{Binding ProgressPercent, Mode=OneWay}" Maximum="100" Height="9"/>
+                                        <TextBlock Text="{Binding CurrentFile}" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" TextTrimming="CharacterEllipsis" Margin="0,8,0,0"/>
+                                    </StackPanel>
+                                    <Grid Grid.Column="2" Margin="0,9,0,6"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+                                        <TextBlock Text="当前速度" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}"/><TextBlock Grid.Column="1" Text="{Binding SpeedText}" FontWeight="SemiBold" HorizontalAlignment="Right"/>
+                                        <TextBlock Grid.Row="1" Text="预计剩余" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}"/><TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding EstimatedRemaining}" FontWeight="SemiBold" HorizontalAlignment="Right"/>
+                                        <TextBlock Grid.Row="2" Text="使用节点" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}"/><TextBlock x:Name="CurrentTaskNodeText" Grid.Row="2" Grid.Column="1" Text="自动最佳节点" FontWeight="SemiBold" HorizontalAlignment="Right" TextTrimming="CharacterEllipsis" MaxWidth="135"/>
+                                    </Grid>
+                                </Grid>
+                                <Button Grid.Row="2" Content="展开任务详情  ⌄" Style="{StaticResource LinkButton}" HorizontalAlignment="Stretch"
+                                        BorderBrush="#E8EDF4" BorderThickness="0,1,0,0" Click="ToggleTaskDetailsButton_Click"/>
+                            </Grid>
+                        </Border>
+
+                        <Border Grid.Row="2" Style="{StaticResource CardStyle}" VerticalAlignment="Stretch">
+                            <Grid>
+                                <Grid.RowDefinitions><RowDefinition Height="64"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                                <Grid Margin="18,0">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <TextBlock Text="任务列表" FontSize="{DynamicResource FontCardTitleSize}" FontWeight="SemiBold"/>
+                                        <TextBlock x:Name="DownloadStatsText" Text="当前任务与等待队列" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Margin="14,2,0,0"/>
+                                    </StackPanel>
+                                    <Button Grid.Column="1" Content="继续全部" Padding="13,7" MinHeight="35" Style="{StaticResource GhostButton}" Click="ContinueAllButton_Click"/>
+                                </Grid>
+                                <ListBox x:Name="JobsGrid" Grid.Row="1" ItemsSource="{Binding Jobs}" SelectionChanged="JobsGrid_SelectionChanged"
+                                         Background="#FBFCFE" BorderThickness="0" ScrollViewer.VerticalScrollBarVisibility="Auto">
+                                    <ListBox.ItemContainerStyle>
+                                        <Style TargetType="ListBoxItem">
+                                            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                            <Setter Property="Padding" Value="0"/>
+                                            <Setter Property="Background" Value="Transparent"/>
+                                            <Setter Property="BorderBrush" Value="#EDF1F6"/>
+                                            <Setter Property="BorderThickness" Value="0,0,0,1"/>
+                                            <Setter Property="Template">
+                                                <Setter.Value>
+                                                    <ControlTemplate TargetType="ListBoxItem">
+                                                        <Border x:Name="RowBorder" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                                                BorderThickness="{TemplateBinding BorderThickness}" Padding="18,12">
+                                                            <ContentPresenter/>
+                                                        </Border>
+                                                        <ControlTemplate.Triggers>
+                                                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="RowBorder" Property="Background" Value="#F4F7FC"/></Trigger>
+                                                            <Trigger Property="IsSelected" Value="True"><Setter TargetName="RowBorder" Property="Background" Value="#EBF2FF"/></Trigger>
+                                                        </ControlTemplate.Triggers>
+                                                    </ControlTemplate>
+                                                </Setter.Value>
+                                            </Setter>
+                                        </Style>
+                                    </ListBox.ItemContainerStyle>
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid MinHeight="50">
+                                                <Grid.ColumnDefinitions><ColumnDefinition Width="118"/><ColumnDefinition Width="*"/><ColumnDefinition Width="230"/><ColumnDefinition Width="115"/></Grid.ColumnDefinitions>
+                                                <Border x:Name="StatePill" Background="#EEF2F7" CornerRadius="11" Padding="9,4" HorizontalAlignment="Left" VerticalAlignment="Center">
+                                                    <TextBlock Text="{Binding State}" FontSize="{DynamicResource FontCaptionSize}" FontWeight="SemiBold" Foreground="#56657A"/>
+                                                </Border>
+                                                <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,24,0">
+                                                    <TextBlock Text="{Binding GalleryDisplayName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                                    <TextBlock Text="{Binding SourceSummary}" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Margin="0,4,0,0"/>
+                                                </StackPanel>
+                                                <StackPanel Grid.Column="2" VerticalAlignment="Center" Margin="0,0,24,0">
+                                                    <TextBlock Text="{Binding ProgressText}" FontSize="{DynamicResource FontCaptionSize}"/>
+                                                    <ProgressBar Value="{Binding ProgressPercent, Mode=OneWay}" Maximum="100" Height="5" Margin="0,7,0,0"/>
+                                                </StackPanel>
+                                                <StackPanel Grid.Column="3" VerticalAlignment="Center">
+                                                    <TextBlock Text="{Binding SpeedText}" FontWeight="SemiBold" HorizontalAlignment="Right"/>
+                                                    <TextBlock Text="{Binding EstimatedRemaining}" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" HorizontalAlignment="Right" Margin="0,4,0,0"/>
+                                                </StackPanel>
+                                            </Grid>
+                                            <DataTemplate.Triggers>
+                                                <DataTrigger Binding="{Binding State}" Value="下载中"><Setter TargetName="StatePill" Property="Background" Value="#E7F0FF"/><Setter TargetName="StatePill" Property="TextElement.Foreground" Value="#245BCB"/></DataTrigger>
+                                                <DataTrigger Binding="{Binding State}" Value="自动续传"><Setter TargetName="StatePill" Property="Background" Value="#E7F0FF"/><Setter TargetName="StatePill" Property="TextElement.Foreground" Value="#245BCB"/></DataTrigger>
+                                                <DataTrigger Binding="{Binding State}" Value="已完成"><Setter TargetName="StatePill" Property="Background" Value="#DFF7EA"/><Setter TargetName="StatePill" Property="TextElement.Foreground" Value="#08734A"/></DataTrigger>
+                                                <DataTrigger Binding="{Binding State}" Value="失败"><Setter TargetName="StatePill" Property="Background" Value="#FFE6EA"/><Setter TargetName="StatePill" Property="TextElement.Foreground" Value="#A3263C"/></DataTrigger>
+                                                <DataTrigger Binding="{Binding State}" Value="已停止"><Setter TargetName="StatePill" Property="Background" Value="#FFF2D8"/><Setter TargetName="StatePill" Property="TextElement.Foreground" Value="#8A5A08"/></DataTrigger>
+                                            </DataTemplate.Triggers>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </Grid>
+                        </Border>
+
+                        <Border x:Name="TaskDetailsCard" Grid.Row="3" Style="{StaticResource CardStyle}" Padding="16,13" Margin="0,12,0,9" Visibility="Collapsed">
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="36"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <Border Width="30" Height="30" Background="#E8F0FF" CornerRadius="9" VerticalAlignment="Top">
+                                    <TextBlock Text="i" Foreground="#315FCA" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                                <StackPanel Grid.Column="1" Margin="5,0,12,0">
+                                    <TextBlock Text="任务说明" FontWeight="SemiBold" FontSize="{DynamicResource FontBodySize}"/>
+                                    <TextBox x:Name="DetailsTextBox" IsReadOnly="True" BorderThickness="0" Padding="0"
+                                             MinHeight="24" MaxHeight="58" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
+                                             Foreground="{StaticResource SubTextBrush}" Background="Transparent" Margin="0,4,0,0"
+                                             Text="选中任务后，这里显示当前文件和中文状态说明。"/>
+                                </StackPanel>
+                                <Button Grid.Column="2" Content="复制说明" Margin="0,0,8,0" Padding="11,5" MinHeight="32" Style="{StaticResource GhostButton}" Click="CopyDetailsButton_Click"/>
+                                <Button Grid.Column="3" Content="打开保存位置" Padding="11,5" MinHeight="32" Click="OpenFolderButton_Click"/>
+                            </Grid>
+                        </Border>
+                        <Grid Grid.Row="4">
+                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                            <Grid>
+                                <TextBlock x:Name="FooterStatusText" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Text="准备就绪。"/>
+                                <TextBlock x:Name="CountText" HorizontalAlignment="Right" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}"/>
+                            </Grid>
+                            <ProgressBar x:Name="ActivityProgressBar" Grid.Row="1" Margin="0,8,0,0" Height="6"
+                                         IsIndeterminate="False" Visibility="Collapsed"/>
+                        </Grid>
+                    </Grid>
+                </TabItem>
+
+                <TabItem Header="下载记录">
+                    <Grid Margin="28,22,28,24">
+                        <Border Style="{StaticResource CardStyle}">
+                            <Grid>
+                                <Grid.RowDefinitions><RowDefinition Height="76"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                                <Grid Margin="22,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <StackPanel VerticalAlignment="Center"><TextBlock Text="下载记录" FontSize="{DynamicResource FontCardTitleSize}" FontWeight="SemiBold"/><TextBlock Text="查看已创建任务、完成时间和保存位置" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Margin="0,5,0,0"/></StackPanel>
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"><Button Content="打开保存位置" Margin="0,0,8,0" Click="HistoryOpenFolderButton_Click"/><Button Content="清除已完成" Style="{StaticResource GhostButton}" Click="ClearFinishedJobsButton_Click"/></StackPanel>
+                                </Grid>
+                                <DataGrid x:Name="HistoryGrid" Grid.Row="1" ItemsSource="{Binding Jobs}" Background="#FBFCFE" ScrollViewer.VerticalScrollBarVisibility="Auto">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="创建时间" Binding="{Binding CreatedAt}" Width="145"/>
+                                        <DataGridTextColumn Header="状态" Binding="{Binding State}" Width="105"/>
+                                        <DataGridTextColumn Header="画廊" Binding="{Binding GalleryDisplayName}" Width="*" MinWidth="180"/>
+                                        <DataGridTextColumn Header="来源" Binding="{Binding SourceLabel}" Width="100"/>
+                                        <DataGridTextColumn Header="进度" Binding="{Binding ProgressText}" Width="190"/>
+                                        <DataGridTextColumn Header="完成时间" Binding="{Binding FinishedAtText}" Width="145"/>
+                                        <DataGridTextColumn Header="用时" Binding="{Binding DurationText}" Width="90"/>
+                                        <DataGridTextColumn Header="保存位置" Binding="{Binding OutputDirectory}" Width="280"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </Grid>
+                        </Border>
+                    </Grid>
+                </TabItem>
+
+                <TabItem Header="连接诊断">
+                    <Grid x:Name="NodeTestPanel" Margin="28,22,28,24">
+                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                        <Border Style="{StaticResource CardStyle}" Padding="21,17" Margin="0,0,0,17">
+                            <Grid>
+                                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="画廊节点实测" FontSize="{DynamicResource FontCardTitleSize}" FontWeight="SemiBold"/>
+                                    <TextBlock x:Name="NodeTestStatusText" Text="稳定完整传输优先，速度其次。" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Margin="0,5,0,0" TextWrapping="Wrap"/>
+                                </StackPanel>
+                                <Grid Grid.Row="1" Margin="0,18,0,0">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="1.15*"/><ColumnDefinition Width="0.9*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <StackPanel Margin="0,0,10,0"><TextBlock Text="测速策略组" FontSize="{DynamicResource FontCaptionSize}" Foreground="{StaticResource SubTextBrush}" Margin="2,0,0,6"/><ComboBox x:Name="NodeGroupComboBox" SelectionChanged="NodeGroupComboBox_SelectionChanged"><ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Name}"/></DataTemplate></ComboBox.ItemTemplate></ComboBox></StackPanel>
+                                    <StackPanel Grid.Column="1" Margin="0,0,14,0"><TextBlock Text="测试范围" FontSize="{DynamicResource FontCaptionSize}" Foreground="{StaticResource SubTextBrush}" Margin="2,0,0,6"/><ComboBox x:Name="NodeTestModeComboBox" SelectedIndex="0"><ComboBoxItem Content="智能快速筛选（推荐）" Tag="smart"/><ComboBoxItem Content="检测全部可用节点" Tag="all"/></ComboBox></StackPanel>
+                                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Bottom">
+                                        <Button x:Name="QuickNodeTestButton" Content="开始测速" IsEnabled="False" Margin="0,0,8,0" Style="{StaticResource PrimaryButton}" Click="QuickNodeTestButton_Click"/>
+                                        <Button x:Name="PreciseNodeTestButton" Content="复测前 5 名" IsEnabled="False" Margin="0,0,8,0" Style="{StaticResource GhostButton}" Click="PreciseNodeTestButton_Click"/>
+                                        <Button x:Name="StopNodeTestButton" Content="停止" IsEnabled="False" Margin="0,0,8,0" Style="{StaticResource DangerButton}" Click="StopNodeTestButton_Click"/>
+                                        <Button x:Name="UseTestedNodeButton" Content="使用选中节点" IsEnabled="False" Click="UseTestedNodeButton_Click"/>
+                                    </StackPanel>
+                                </Grid>
+                            </Grid>
+                        </Border>
+                        <Border Grid.Row="1" Style="{StaticResource CardStyle}">
+                            <Grid>
+                                <Grid.RowDefinitions><RowDefinition Height="55"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                <Grid Margin="18,0">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <TextBlock Text="实测排名" FontSize="{DynamicResource FontCardTitleSize}" FontWeight="SemiBold"/>
+                                        <TextBlock x:Name="NodeCandidateText" Text="正在连接 Clash…" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Margin="13,2,0,0"/>
+                                    </StackPanel>
+                                    <TextBlock Grid.Column="1" Text="排序：成功率 → 中断次数 → 实际速度 → 延迟"
+                                               Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" VerticalAlignment="Center"/>
+                                </Grid>
+                                <DataGrid x:Name="NodeResultsGrid" Grid.Row="1" ItemsSource="{Binding NodeResults}"
+                                          SelectionChanged="NodeResultsGrid_SelectionChanged" CanUserSortColumns="False"
+                                          ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.HorizontalScrollBarVisibility="Auto">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="排名" Binding="{Binding RankText}" Width="58"/>
+                                        <DataGridTextColumn Header="节点" Binding="{Binding Name}" Width="*" MinWidth="220"/>
+                                        <DataGridTextColumn Header="协议" Binding="{Binding Type}" Width="100"/>
+                                        <DataGridTextColumn Header="延迟" Binding="{Binding ClashDelayText}" Width="95"/>
+                                        <DataGridTextColumn Header="传输" Binding="{Binding SuccessText}" Width="90"/>
+                                        <DataGridTextColumn Header="中断" Binding="{Binding Interruptions}" Width="70"/>
+                                        <DataGridTextColumn Header="实际速度" Binding="{Binding SpeedText}" Width="115"/>
+                                        <DataGridTextColumn Header="评价" Binding="{Binding Rating}" Width="100"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                                <Border Grid.Row="2" Background="#F8FAFD" BorderBrush="#E7ECF3" BorderThickness="0,1,0,0" Padding="18,13">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                        <Border Width="32" Height="32" Background="#E8F0FF" CornerRadius="9" Margin="0,0,12,0">
+                                            <TextBlock Text="i" FontWeight="Bold" Foreground="#315FCA" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Border>
+                                        <StackPanel Grid.Column="1">
+                                            <TextBlock Text="选中节点说明" FontWeight="SemiBold" FontSize="{DynamicResource FontBodySize}"/>
+                                            <TextBlock x:Name="NodeDetailText" Text="选择一个节点后，这里显示完整测试过程和失败原因。"
+                                                       Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" TextWrapping="Wrap" MaxHeight="60" Margin="0,5,0,0"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </Grid>
+                        </Border>
+                    </Grid>
+                </TabItem>
+
+                <TabItem Header="设置">
+                    <TabControl x:Name="SettingsTabControl" Margin="28,22,28,24" TabStripPlacement="Left"
+                                Background="Transparent" BorderThickness="0" ItemContainerStyle="{StaticResource SettingsTabItem}"
+                                HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch">
+                        <TabItem Header="下载设置">
+                            <Border Style="{StaticResource CardStyle}">
+                                <StackPanel>
+                                    <StackPanel Margin="24,22,24,15">
+                                        <TextBlock Text="下载设置" FontSize="{DynamicResource FontCardTitleSize}" FontWeight="SemiBold"/>
+                                        <TextBlock Text="这些选项会作为新任务的默认值" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Margin="0,5,0,0"/>
+                                    </StackPanel>
+                                    <Border Style="{StaticResource SettingRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="320"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="界面大小" FontWeight="SemiBold"/><TextBlock Text="2K 屏推荐 110%；修改后立即生效" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Margin="0,4,0,0"/></StackPanel><ComboBox x:Name="UiScaleComboBox" Grid.Column="1" SelectionChanged="UiScaleComboBox_SelectionChanged"><ComboBoxItem Content="标准（100%）" Tag="100"/><ComboBoxItem Content="舒适（110%，推荐）" Tag="110"/><ComboBoxItem Content="大号（125%）" Tag="125"/></ComboBox></Grid></Border>
+                                    <Border Style="{StaticResource SettingRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="320"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="图片质量" FontWeight="SemiBold"/><TextBlock Text="原图更清晰，但会消耗更多流量" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Margin="0,4,0,0"/></StackPanel><ComboBox x:Name="QualityComboBox" Grid.Column="1"><ComboBoxItem Content="原图（推荐）" Tag="original"/><ComboBoxItem Content="网站压缩图（更省流量）" Tag="resized"/></ComboBox></Grid></Border>
+                                    <Border Style="{StaticResource SettingRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="320"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="完成后的文件格式" FontWeight="SemiBold"/><TextBlock Text="保持文件夹，或打包为漫画阅读器格式" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Margin="0,4,0,0"/></StackPanel><CheckBox x:Name="CbzCheckBox" Grid.Column="1" Content="打包为 CBZ"/></Grid></Border>
+                                    <Border Style="{StaticResource SettingRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="320"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="保存画廊信息" FontWeight="SemiBold"/><TextBlock Text="同时保存标题、标签等元数据" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Margin="0,4,0,0"/></StackPanel><CheckBox x:Name="MetadataCheckBox" Grid.Column="1" Content="保存画廊信息" IsChecked="True"/></Grid></Border>
+                                </StackPanel>
+                            </Border>
+                        </TabItem>
+                        <TabItem Header="网络与节点">
+                            <Border Style="{StaticResource CardStyle}">
+                                <StackPanel>
+                                    <StackPanel Margin="24,22,24,15"><TextBlock Text="网络与节点" FontSize="{DynamicResource FontCardTitleSize}" FontWeight="SemiBold"/><TextBlock Text="通常保持推荐设置即可" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Margin="0,5,0,0"/></StackPanel>
+                                    <Border Style="{StaticResource SettingRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="320"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="使用 Clash 代理" FontWeight="SemiBold"/><TextBlock x:Name="ProxyDetectionStatusText" Text="等待识别" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Margin="0,4,0,0"/></StackPanel><CheckBox x:Name="UseProxyCheckBox" Grid.Column="1" Content="启用代理" IsChecked="True"/></Grid></Border>
+                                    <Border Style="{StaticResource SettingRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="320"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="代理地址" FontWeight="SemiBold"/><TextBlock Text="自动识别失败时可以手动填写" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Margin="0,4,0,0"/></StackPanel><StackPanel Grid.Column="1"><TextBox x:Name="ProxyTextBox" Text="http://127.0.0.1:7897"/><CheckBox x:Name="AutoDetectProxyCheckBox" Content="自动识别端口（推荐）" IsChecked="True" Margin="0,8,0,0" Checked="AutoDetectProxyCheckBox_Changed" Unchecked="AutoDetectProxyCheckBox_Changed"/></StackPanel></Grid></Border>
+                                    <Border Style="{StaticResource SettingRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="320"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="节点策略" FontWeight="SemiBold"/><TextBlock Text="失败时自动切换节点并继续下载" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Margin="0,4,0,0"/></StackPanel><ComboBox x:Name="AutoFailoverModeComboBox" Grid.Column="1"><ComboBoxItem Content="自动选择测速前 3 名（推荐）" Tag="top3"/><ComboBoxItem Content="固定使用当前节点" Tag="off"/><ComboBoxItem Content="遍历全部已测速节点" Tag="all"/></ComboBox></Grid></Border>
+                                    <Border Style="{StaticResource SettingRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="320"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="优先 IPv4" FontWeight="SemiBold"/><TextBlock Text="部分网络环境下更稳定" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Margin="0,4,0,0"/></StackPanel><CheckBox x:Name="ForceIpv4CheckBox" Grid.Column="1" Content="优先使用 IPv4" IsChecked="True"/></Grid></Border>
+                                </StackPanel>
+                            </Border>
+                        </TabItem>
+                        <TabItem Header="ExHentai 登录">
+                            <Border Style="{StaticResource CardStyle}">
+                                <StackPanel>
+                                    <StackPanel Margin="25,23,25,17"><TextBlock Text="ExHentai 登录" FontSize="{DynamicResource FontCardTitleSize}" FontWeight="SemiBold"/><TextBlock Text="可以自动导入，也可以手动填写；两种方式都只保存在这台电脑上" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Margin="0,5,0,0"/></StackPanel>
+                                    <Border Margin="25,0,25,5" Padding="18" Background="#F0F6FF" CornerRadius="12" BorderBrush="#D9E7FF" BorderThickness="1">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock Text="方式一：从正在打开的网页导入" FontSize="{DynamicResource FontNavSize}" FontWeight="SemiBold"/>
+                                                <TextBlock Text="适合忘记密码或长期保持网页登录的用户；只读取三项必要登录 Cookie" Foreground="#526B91" FontSize="{DynamicResource FontCaptionSize}" Margin="0,5,0,0"/>
+                                            </StackPanel>
+                                            <Button x:Name="OpenExtensionSetupButton" Grid.Column="1" Content="首次安装扩展" Margin="12,0,9,0"
+                                                    Style="{StaticResource GhostButton}" Click="OpenExtensionSetupButton_Click"/>
+                                            <Button x:Name="ImportBrowserCookieButton" Grid.Column="2" Content="从当前网页导入"
+                                                    Style="{StaticResource PrimaryButton}" Click="ImportBrowserCookieButton_Click"/>
+                                        </Grid>
+                                    </Border>
+                                    <Border Style="{StaticResource SettingRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="320"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="下载时使用的登录方式" FontWeight="SemiBold"/><TextBlock Text="自动导入和手动填写最终都会安全转换为可验证的登录状态" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Margin="0,4,0,0"/></StackPanel><ComboBox x:Name="LoginModeComboBox" Grid.Column="1" SelectionChanged="LoginModeComboBox_SelectionChanged"><ComboBoxItem Content="使用已导入或手动填写的 Cookie（推荐）" Tag="manual"/><ComboBoxItem Content="尝试从本机 Edge 资料读取" Tag="edge"/><ComboBoxItem Content="尝试从本机 Chrome 资料读取" Tag="chrome"/><ComboBoxItem Content="尝试从本机 Firefox 资料读取" Tag="firefox"/><ComboBoxItem Content="不登录（仅公开画廊）" Tag="none"/></ComboBox></Grid></Border>
+                                    <Border x:Name="ManualCookiePanel" Margin="25,8,25,22" Padding="18" Background="#FBFCFE" BorderBrush="#E2E8F1" BorderThickness="1" CornerRadius="12">
+                                        <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                            <StackPanel Grid.ColumnSpan="4" Margin="0,0,0,11"><TextBlock Text="方式二：手动填写 Cookie" FontWeight="SemiBold" FontSize="{DynamicResource FontNavSize}"/><TextBlock Text="适合习惯自己复制 Cookie 的用户；可以随时显示、验证或清除" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Margin="0,4,0,0"/></StackPanel>
+                                            <Grid Grid.Row="1"><PasswordBox x:Name="CookiePasswordBox" PasswordChar="●" PasswordChanged="CookiePasswordBox_PasswordChanged"/><TextBox x:Name="CookieVisibleTextBox" Visibility="Collapsed" TextChanged="CookieVisibleTextBox_TextChanged"/></Grid>
+                                            <Button x:Name="ToggleCookieButton" Grid.Row="1" Grid.Column="1" Content="显示" Margin="8,0,0,0" Click="ToggleCookieButton_Click"/>
+                                            <Button x:Name="VerifyCookieButton" Grid.Row="1" Grid.Column="2" Content="验证登录" Margin="8,0,0,0" Style="{StaticResource PrimaryButton}" Click="VerifyCookieButton_Click"/>
+                                            <Button Grid.Row="1" Grid.Column="3" Content="清除" Margin="8,0,0,0" Click="ClearCookieButton_Click"/>
+                                            <Grid Grid.Row="2" Grid.ColumnSpan="4" Margin="0,10,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><CheckBox x:Name="RememberCookieCheckBox" Content="自动加密保存" Checked="RememberCookieCheckBox_Changed" Unchecked="RememberCookieCheckBox_Changed"/><TextBlock x:Name="CookieStatusText" Grid.Column="1" Margin="16,0,0,0" TextWrapping="Wrap" Foreground="{StaticResource SubTextBrush}" Text="尚未验证"/></Grid>
+                                        </Grid>
+                                    </Border>
+                                </StackPanel>
+                            </Border>
+                        </TabItem>
+                        <TabItem Header="软件与更新">
+                            <Border Style="{StaticResource CardStyle}">
+                                <StackPanel>
+                                    <StackPanel Margin="24,22,24,15"><TextBlock Text="软件与更新" FontSize="{DynamicResource FontCardTitleSize}" FontWeight="SemiBold"/><TextBlock Text="当前版本 1.1.0" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Margin="0,5,0,0"/></StackPanel>
+                                    <Border Style="{StaticResource SettingRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="下载内核" FontWeight="SemiBold"/><TextBlock Text="检查 gallery-dl 内核是否需要更新" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Margin="0,4,0,0"/></StackPanel><Button Grid.Column="1" Content="检查内核更新" Click="InstallEngineButton_Click"/></Grid></Border>
+                                    <Border Style="{StaticResource SettingRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="软件更新" FontWeight="SemiBold"/><TextBlock Text="从 GitHub Release 检查新版本" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Margin="0,4,0,0"/></StackPanel><Button Grid.Column="1" Content="检查软件更新" Click="AppUpdateButton_Click"/></Grid></Border>
+                                </StackPanel>
+                            </Border>
+                        </TabItem>
+                    </TabControl>
+                </TabItem>
+            </TabControl>
         </Grid>
     </Grid>
 </Window>

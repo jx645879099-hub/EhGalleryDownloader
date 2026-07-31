@@ -1,0 +1,17 @@
+:root { color-scheme: light; font-family: "Microsoft YaHei UI", system-ui, sans-serif; }
+* { box-sizing: border-box; }
+body { margin: 0; width: 340px; background: #f5f7fb; color: #17243a; }
+main { padding: 18px; }
+.brand { display: flex; align-items: center; gap: 11px; }
+.brand > span { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px; background: #2563eb; color: #fff; font-size: 18px; font-weight: 700; }
+.brand strong, .brand small { display: block; }
+.brand strong { font-size: 15px; }
+.brand small, .privacy { color: #6b7b91; margin-top: 3px; }
+#scope { margin: 16px 0 11px; padding: 12px; border: 1px solid #dfe7f3; border-radius: 10px; background: #fff; font-size: 12px; line-height: 1.65; }
+#status { min-height: 42px; padding: 10px 11px; border-radius: 9px; background: #eef4ff; color: #31558c; font-size: 12px; line-height: 1.55; }
+#status.error { background: #fff1f2; color: #9f2338; }
+#status.success { background: #ecfdf5; color: #08734a; }
+button { width: 100%; margin-top: 13px; padding: 10px 12px; border: 0; border-radius: 9px; background: #2563eb; color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+button:hover { background: #1d55d5; }
+button:disabled { background: #a8b9db; cursor: default; }
+.privacy { display: block; text-align: center; font-size: 10px; margin-top: 10px; }

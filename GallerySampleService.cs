@@ -44,9 +44,12 @@ public static class GallerySampleService
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 CreateNoWindow = true,
-                StandardOutputEncoding = Encoding.UTF8,
-                StandardErrorEncoding = Encoding.UTF8
+                StandardOutputEncoding = GalleryDlProcessEncoding.Current,
+                StandardErrorEncoding = GalleryDlProcessEncoding.Current
             };
+            info.Environment["PYTHONUTF8"] = "1";
+            info.Environment["PYTHONIOENCODING"] = "utf-8";
+            info.Environment["PYTHONLEGACYWINDOWSSTDIO"] = "0";
             Add(info, "--config-ignore", "--config-json", configPath);
             Add(info, "--no-input", "--no-colors", "--get-urls", "--range",
                 $"1-{maximumItems}");

@@ -7,10 +7,12 @@
     <Nullable>enable</Nullable>
     <AssemblyName>EhGalleryDownloader</AssemblyName>
     <RootNamespace>EhGalleryDownloader</RootNamespace>
+    <Version>1.1.0</Version>
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>false</SelfContained>
     <DebugType>embedded</DebugType>
     <NuGetAudit>false</NuGetAudit>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
 
   <ItemGroup Condition="Exists('tools\gallery-dl.exe')">
@@ -23,6 +25,20 @@
     <Content Include="THIRD-PARTY-NOTICES.txt">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+  <ItemGroup Condition="!Exists('tools\gallery-dl.exe') And Exists('dist\tools\gallery-dl.exe')">
+    <Content Include="dist\tools\gallery-dl.exe">
+      <Link>tools\gallery-dl.exe</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+  <ItemGroup Condition="Exists('BrowserExtension')">
+    <Content Include="BrowserExtension\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <TargetPath>BrowserExtension\%(RecursiveDir)%(Filename)%(Extension)</TargetPath>
     </Content>
   </ItemGroup>
   <ItemGroup>

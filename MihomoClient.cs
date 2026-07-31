@@ -137,6 +137,21 @@ public sealed class MihomoClient : IDisposable
         int timeoutMilliseconds,
         string expectedStatus = "200-399",
         CancellationToken cancellationToken = default)
+        => await RefreshAndMeasureGroupDelaysAsync(
+            groupName,
+            nodeNames,
+            testUrl,
+            timeoutMilliseconds,
+            expectedStatus,
+            cancellationToken);
+
+    public async Task<IReadOnlyDictionary<string, int>> RefreshAndMeasureGroupDelaysAsync(
+        string groupName,
+        IReadOnlyCollection<string> nodeNames,
+        Uri testUrl,
+        int timeoutMilliseconds,
+        string expectedStatus = "200-399",
+        CancellationToken cancellationToken = default)
     {
         if (nodeNames.Count == 0)
             return new Dictionary<string, int>(StringComparer.Ordinal);
@@ -304,6 +319,7 @@ public sealed class MihomoClient : IDisposable
             + $"&timeout={Math.Clamp(timeoutMilliseconds, 500, 15000)}";
         if (!string.IsNullOrWhiteSpace(expectedStatus))
             query += $"&expected={Uri.EscapeDataString(expectedStatus)}";
+        query += $"&fresh={DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}";
         return path + "?" + query;
     }
 
@@ -323,8 +339,15 @@ public sealed class MihomoClient : IDisposable
 
     private async Task<JsonDocument> GetJsonAsync(string path, CancellationToken cancellationToken)
     {
-        using var response = await _http.GetAsync(
-            path, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        using var request = new HttpRequestMessage(HttpMethod.Get, path);
+        request.Headers.CacheControl = new CacheControlHeaderValue
+        {
+            NoCache = true,
+            NoStore = true
+        };
+        request.Headers.Pragma.ParseAdd("no-cache");
+        using var response = await _http.SendAsync(
+            request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         await EnsureSuccessAsync(response, cancellationToken);
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         return await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);

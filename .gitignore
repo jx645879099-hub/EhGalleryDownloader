@@ -14,6 +14,8 @@ tools/
 
 # Local integration output
 integration-output/
+验收下载/
+*.lnk
 
 # Runtime state and sensitive local data
 *.log

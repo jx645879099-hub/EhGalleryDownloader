@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "画廊登录导入",
+  "version": "1.0.0",
+  "description": "经用户确认，将当前 E-Hentai/ExHentai 页面的必要登录 Cookie 发送到本机画廊下载助手。",
+  "permissions": ["cookies", "activeTab"],
+  "host_permissions": [
+    "https://e-hentai.org/*",
+    "https://*.e-hentai.org/*",
+    "https://exhentai.org/*",
+    "https://*.exhentai.org/*",
+    "http://127.0.0.1/*"
+  ],
+  "action": {
+    "default_title": "导入当前画廊登录状态",
+    "default_popup": "popup.html"
+  }
+}

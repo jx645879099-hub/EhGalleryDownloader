@@ -11,6 +11,11 @@ public sealed class GalleryDlService : IDisposable
     private Process? _process;
     private readonly object _gate = new();
     private string _lastRawError = "";
+    private readonly Stopwatch _stopwatch = new();
+    private readonly HashSet<string> _completedPaths = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _skippedPaths = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _failedPaths = new(StringComparer.OrdinalIgnoreCase);
+    private long _downloadedBytes;
 
     public bool IsRunning
     {
@@ -24,9 +29,12 @@ public sealed class GalleryDlService : IDisposable
 
     public event Action<string>? OutputReceived;
     public event Action<string>? CurrentFileChanged;
+    public event Action<string, int>? GalleryMetadataChanged;
+    public event Action<int>? ExistingPrefixDetected;
     public event Action? FileCompleted;
     public event Action? FileSkipped;
     public event Action? FileFailed;
+    public event Action<DownloadProgress>? ProgressChanged;
 
     public async Task<int> RunAsync(string enginePath, DownloadJob job, CancellationToken cancellationToken)
     {
@@ -37,6 +45,24 @@ public sealed class GalleryDlService : IDisposable
         var logPath = Path.Combine(SettingsStore.LogDirectory,
             $"{DateTime.Now:yyyyMMdd-HHmmss}-{job.Id:N}.log");
         var runConfigPath = CreateRunConfig(job);
+        var progressPath = Path.Combine(SettingsStore.DataDirectory,
+            $"progress-{job.Id:N}.log");
+        try { File.Delete(progressPath); } catch { }
+        _lastRawError = "";
+        _downloadedBytes = 0;
+        _completedPaths.Clear();
+        _skippedPaths.Clear();
+        _failedPaths.Clear();
+        _stopwatch.Restart();
+
+        var resumePlan = GalleryResumePlanner.Create(job);
+        if (resumePlan is not null)
+        {
+            ExistingPrefixDetected?.Invoke(resumePlan.ExistingPrefixCount);
+            OutputReceived?.Invoke(
+                $"已在本地确认前 {resumePlan.ExistingPrefixCount} 张完整图片，"
+                + $"将直接从第 {resumePlan.StartIndex} 张继续。" );
+        }
 
         var info = new ProcessStartInfo
         {
@@ -46,16 +72,21 @@ public sealed class GalleryDlService : IDisposable
             RedirectStandardError = true,
             RedirectStandardInput = true,
             CreateNoWindow = true,
-            StandardOutputEncoding = Encoding.UTF8,
-            StandardErrorEncoding = Encoding.UTF8
+            StandardOutputEncoding = GalleryDlProcessEncoding.Current,
+            StandardErrorEncoding = GalleryDlProcessEncoding.Current
         };
+        ConfigureUtf8Output(info);
 
-        AddCommonArguments(info, job, logPath, runConfigPath);
+        AddCommonArguments(info, job, logPath, runConfigPath, progressPath, resumePlan);
         info.ArgumentList.Add(job.Url);
 
         using var process = new Process { StartInfo = info, EnableRaisingEvents = true };
         Task stdoutTask = Task.CompletedTask;
         Task stderrTask = Task.CompletedTask;
+        Task progressTask = Task.CompletedTask;
+        using var progressCancellation =
+            CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var progressCursor = new ProgressFileCursor();
         try
         {
             process.Start();
@@ -64,6 +95,8 @@ public sealed class GalleryDlService : IDisposable
 
             stdoutTask = PumpAsync(process.StandardOutput, false, cancellationToken);
             stderrTask = PumpAsync(process.StandardError, true, cancellationToken);
+            progressTask = MonitorProgressFileAsync(
+                progressPath, progressCursor, progressCancellation.Token);
 
             await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
             await Task.WhenAll(stdoutTask, stderrTask).ConfigureAwait(false);
@@ -88,15 +121,35 @@ public sealed class GalleryDlService : IDisposable
         }
         finally
         {
+            progressCancellation.Cancel();
+            try { await progressTask.ConfigureAwait(false); } catch { }
+            DrainProgressFile(progressPath, progressCursor);
             lock (_gate)
             {
                 if (ReferenceEquals(_process, process)) _process = null;
             }
             try { File.Delete(runConfigPath); } catch { }
+            try { File.Delete(progressPath); } catch { }
         }
     }
 
-    private static void AddCommonArguments(ProcessStartInfo info, DownloadJob job, string logPath, string runConfigPath)
+    private static void ConfigureUtf8Output(ProcessStartInfo info)
+    {
+        // gallery-dl is a frozen Python application. Without these settings,
+        // Chinese Windows can emit file paths as CP936 while .NET reads UTF-8.
+        info.Environment["PYTHONUTF8"] = "1";
+        info.Environment["PYTHONIOENCODING"] = "utf-8";
+        info.Environment["PYTHONLEGACYWINDOWSSTDIO"] = "0";
+        info.Environment["PYTHONUNBUFFERED"] = "1";
+    }
+
+    private static void AddCommonArguments(
+        ProcessStartInfo info,
+        DownloadJob job,
+        string logPath,
+        string runConfigPath,
+        string progressPath,
+        GalleryResumePlan? resumePlan)
     {
         Add(info, "--config-ignore");
         Add(info, "--config-json", runConfigPath);
@@ -105,9 +158,16 @@ public sealed class GalleryDlService : IDisposable
         Add(info, "--windows-filenames");
         Add(info, "--destination", job.OutputDirectory);
         Add(info, "--write-log", logPath);
+        Add(info, "--Print-to-file", "post:__GUI_META__|{gid}|{filecount}|{title}", progressPath);
+        Add(info, "--Print-to-file", "prepare:__GUI_PREPARE__|{num}|{filecount}|{_path}", progressPath);
+        Add(info, "--Print-to-file", "after:__GUI_SUCCESS__|{num}|{filecount}|{_path}", progressPath);
+        Add(info, "--Print-to-file", "skip:__GUI_SKIP__|{num}|{filecount}|{_path}", progressPath);
+        Add(info, "--Print-to-file", "error:__GUI_FAILURE__|{num}|{filecount}|{_path}", progressPath);
         Add(info, "--http-timeout", "35");
         Add(info, "--retries", "4");
         Add(info, "--sleep-retries", "2.0-5.0");
+        if (resumePlan is not null)
+            Add(info, "--range", $"{resumePlan.StartIndex}-");
         Add(info, "--option", "extractor.exhentai.fallback-retries=2");
         Add(info, "--option", "extractor.exhentai.gp=resized");
         Add(info, "--option", $"extractor.exhentai.original={job.Options.DownloadOriginal.ToString().ToLowerInvariant()}");
@@ -127,18 +187,7 @@ public sealed class GalleryDlService : IDisposable
     private static string CreateRunConfig(DownloadJob job)
     {
         var path = Path.Combine(SettingsStore.DataDirectory, $"run-{job.Id:N}.json");
-        var mode = new Dictionary<string, object>
-        {
-            ["start"] = new object[] { 16, "__GUI_PREPARE__|{}\n" },
-            ["success"] = new object[] { 16, "__GUI_SUCCESS__|{}\n" },
-            ["skip"] = new object[] { 13, "__GUI_SKIP__|{}\n" },
-            ["progress"] = "",
-            ["progress-total"] = ""
-        };
-        var config = new Dictionary<string, object>
-        {
-            ["output"] = new Dictionary<string, object> { ["mode"] = mode }
-        };
+        var config = new Dictionary<string, object>();
         if (job.Options.LoginMode == "manual"
             && CookieParser.TryParse(job.Options.ManualCookie, out var cookies, out _))
         {
@@ -152,6 +201,11 @@ public sealed class GalleryDlService : IDisposable
             };
         }
         File.WriteAllText(path, JsonSerializer.Serialize(config));
+        try
+        {
+            File.SetAttributes(path, FileAttributes.Hidden | FileAttributes.Temporary);
+        }
+        catch { }
         return path;
     }
 
@@ -177,22 +231,45 @@ public sealed class GalleryDlService : IDisposable
     {
         var line = StripAnsi(raw).Trim();
         if (line.Length == 0) return;
+        if (line.Contains('\uFFFD'))
+        {
+            if (isError) _lastRawError = "下载内核返回了无法解码的文字。";
+            OutputReceived?.Invoke("正在处理文件（文件名包含当前编码无法显示的字符）。");
+            return;
+        }
 
-        if (line.StartsWith("__GUI_PREPARE__|", StringComparison.Ordinal))
+        if (GalleryDlOutputParser.TryParse(line, out var marker))
         {
-            CurrentFileChanged?.Invoke(ShortenPath(line[16..]));
-            return;
-        }
-        if (line.StartsWith("__GUI_SUCCESS__|", StringComparison.Ordinal))
-        {
-            FileCompleted?.Invoke();
-            CurrentFileChanged?.Invoke(ShortenPath(line[16..]));
-            return;
-        }
-        if (line.StartsWith("__GUI_SKIP__|", StringComparison.Ordinal))
-        {
-            FileSkipped?.Invoke();
-            CurrentFileChanged?.Invoke(ShortenPath(line[13..]));
+            if (marker.Kind == GalleryDlEventKind.Metadata)
+            {
+                GalleryMetadataChanged?.Invoke(marker.Path, marker.Total);
+                return;
+            }
+            CurrentFileChanged?.Invoke(ShortenPath(marker.Path));
+            switch (marker.Kind)
+            {
+                case GalleryDlEventKind.Prepare:
+                    ReportProgress(marker, includeFileBytes: false);
+                    break;
+                case GalleryDlEventKind.Success:
+                    if (_completedPaths.Add(marker.Path))
+                    {
+                        FileCompleted?.Invoke();
+                        ReportProgress(marker, includeFileBytes: true);
+                    }
+                    break;
+                case GalleryDlEventKind.Skip:
+                    if (_skippedPaths.Add(marker.Path))
+                    {
+                        FileSkipped?.Invoke();
+                        ReportProgress(marker, includeFileBytes: false);
+                    }
+                    break;
+                case GalleryDlEventKind.Failure:
+                    if (_failedPaths.Add(marker.Path)) FileFailed?.Invoke();
+                    ReportProgress(marker, includeFileBytes: false);
+                    break;
+            }
             return;
         }
 
@@ -201,10 +278,78 @@ public sealed class GalleryDlService : IDisposable
                         || line.Contains("exception", StringComparison.OrdinalIgnoreCase)))
         {
             _lastRawError = line;
-            FileFailed?.Invoke();
         }
 
         OutputReceived?.Invoke(ToChineseMessage(line));
+    }
+
+    private sealed class ProgressFileCursor
+    {
+        public int LinesRead { get; set; }
+    }
+
+    private async Task MonitorProgressFileAsync(
+        string path,
+        ProgressFileCursor cursor,
+        CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            DrainProgressFile(path, cursor);
+            try
+            {
+                await Task.Delay(180, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+        }
+    }
+
+    private void DrainProgressFile(string path, ProgressFileCursor cursor)
+    {
+        try
+        {
+            if (!File.Exists(path)) return;
+            var lines = new List<string>();
+            using (var stream = new FileStream(
+                       path, FileMode.Open, FileAccess.Read,
+                       FileShare.ReadWrite | FileShare.Delete))
+            using (var reader = new StreamReader(
+                       stream, new UTF8Encoding(false, false),
+                       detectEncodingFromByteOrderMarks: true))
+            {
+                while (reader.ReadLine() is { } line) lines.Add(line);
+            }
+
+            if (lines.Count < cursor.LinesRead) cursor.LinesRead = 0;
+            for (var index = cursor.LinesRead; index < lines.Count; index++)
+                ParseLine(lines[index], isError: false);
+            cursor.LinesRead = lines.Count;
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+    }
+
+    private void ReportProgress(GalleryDlEvent marker, bool includeFileBytes)
+    {
+        if (includeFileBytes)
+        {
+            try
+            {
+                if (File.Exists(marker.Path))
+                    _downloadedBytes += new FileInfo(marker.Path).Length;
+            }
+            catch { }
+        }
+        var elapsed = _stopwatch.Elapsed.TotalSeconds;
+        var speed = elapsed > 0 ? _downloadedBytes / 1024d / 1024d / elapsed : 0;
+        TimeSpan? remaining = null;
+        if (marker.Current > 0 && marker.Total > marker.Current && elapsed > 0)
+            remaining = TimeSpan.FromSeconds(elapsed / marker.Current * (marker.Total - marker.Current));
+        ProgressChanged?.Invoke(new DownloadProgress(
+            marker.Current, marker.Total, speed, remaining));
     }
 
     private static string ShortenPath(string path)
@@ -262,4 +407,5 @@ public sealed class GalleryDlService : IDisposable
     }
 
     public void Dispose() => Stop();
+
 }

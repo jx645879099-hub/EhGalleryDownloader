@@ -11,6 +11,7 @@ public static class SettingsStore
     public static string ArchivePath => Path.Combine(DataDirectory, "download-archive.sqlite3");
     public static string LogDirectory => Path.Combine(DataDirectory, "logs");
     public static string EncryptedCookiePath => Path.Combine(DataDirectory, "login-cookie.dat");
+    public static string JobsPath => Path.Combine(DataDirectory, "jobs.json");
     private static string SettingsPath => Path.Combine(DataDirectory, "settings.json");
 
     public static AppSettings Load()
@@ -18,7 +19,13 @@ public static class SettingsStore
         try
         {
             if (File.Exists(SettingsPath))
-                return JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(SettingsPath)) ?? new AppSettings();
+            {
+                var settings = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(SettingsPath))
+                               ?? new AppSettings();
+                if (settings.UiScalePercent is not (100 or 110 or 125))
+                    settings.UiScalePercent = 110;
+                return settings;
+            }
         }
         catch
         {
@@ -30,7 +37,17 @@ public static class SettingsStore
     public static void Save(AppSettings settings)
     {
         Directory.CreateDirectory(DataDirectory);
-        File.WriteAllText(SettingsPath, JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true }));
+        WriteAllTextAtomic(
+            SettingsPath,
+            JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true }));
+    }
+
+    public static void WriteAllTextAtomic(string path, string contents)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var temporaryPath = path + $".{Environment.ProcessId}.tmp";
+        File.WriteAllText(temporaryPath, contents);
+        File.Move(temporaryPath, path, true);
     }
 
     public static void CleanupStaleRunFiles()
