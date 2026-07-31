@@ -1,0 +1,16 @@
+画廊登录导入扩展（Chrome / Edge 通用）
+
+首次安装：
+1. Chrome 打开 chrome://extensions/；Edge 打开 edge://extensions/。
+2. 开启右上角“开发者模式”。
+3. 点击“加载已解压的扩展程序”。
+4. 选择本文件所在的 BrowserExtension 文件夹。
+5. 建议将“画廊登录导入”固定到浏览器工具栏。
+
+以后使用：
+1. 保持已登录的 E-Hentai / ExHentai 网页打开。
+2. 在画廊下载助手的“设置 → ExHentai 登录”中点击“从当前网页导入”。
+3. 在两分钟内点击浏览器工具栏中的本扩展，再点击导入按钮。
+
+扩展只读取上述两个网站的 ipb_member_id、ipb_pass_hash、igneous，
+并且只发送到本机 127.0.0.1。它不会读取浏览器保存的密码、历史记录或其他网站。
