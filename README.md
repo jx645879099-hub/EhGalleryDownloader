@@ -1,76 +1,60 @@
 # 画廊下载助手
 
-一个面向 Windows 的中文图形界面，使用持续维护的 `gallery-dl` 作为下载内核。
+[![Windows](https://img.shields.io/badge/Windows-10%20%2F%2011-2563EB)](https://github.com/jx645879099-hub/EhGalleryDownloader/releases/latest)
+[![Release](https://img.shields.io/github/v/release/jx645879099-hub/EhGalleryDownloader)](https://github.com/jx645879099-hub/EhGalleryDownloader/releases/latest)
+[![Build](https://github.com/jx645879099-hub/EhGalleryDownloader/actions/workflows/build.yml/badge.svg)](https://github.com/jx645879099-hub/EhGalleryDownloader/actions/workflows/build.yml)
 
-## 主要能力
+面向 Windows 的中文 E-Hentai / ExHentai 下载工具，以 `gallery-dl` 为下载内核，提供任务队列、断点续传、Clash 节点实测和图形化操作界面。
 
-- 一次粘贴一条或多条画廊链接，按可调整顺序的队列依次下载
-- 从 Edge、Chrome 或 Firefox 读取当前登录状态，不保存账号密码
-- 通过 Clash 本地代理下载，并自动识别当前 `mixed-port`
-- 原图 / 网站压缩图选择
-- `.part` 断点续传与已存在文件跳过
-- 失败后换节点并重新尝试，不重复下载成功文件
-- 下载任务自动保存；关闭或意外退出后可恢复任务并继续补漏
-- 已完成节点测速时，网络失败可关闭自动切换、按排名尝试前 3 名，或尝试全部已测速节点续传
-- 显示文件总数、实时速度和预计剩余时间
-- 内置智能节点测速：Clash 并发初筛、真实画廊小流量下载、失败时重新分配图片服务器复测
-- 智能模式优先覆盖不同地区，只实测约 15 个候选，也可选择检测全部可用节点
-- 对前 5 名进行多服务器精确复测
-- 测试后自动恢复原节点，确认后才应用推荐节点
-- 保存画廊信息，可选打包为 CBZ
-- 中文状态和常见错误说明
-- 检查软件自身的新版本，并跳转到对应的 GitHub Release 下载页
+## 下载
 
-## 使用
+**[下载最新版 Windows 64 位完整包](https://github.com/jx645879099-hub/EhGalleryDownloader/releases/latest)**
 
-界面默认使用适合 2K 屏阅读的“舒适 110%”字号，并启用 Windows Per-Monitor V2 DPI 适配。可以在“设置 → 下载设置 → 界面大小”中切换标准 100%、舒适 110% 或大号 125%，修改后立即生效并自动保存。
+完整包已包含 .NET 运行环境、下载内核和浏览器登录导入组件。下载 ZIP 后解压，双击 `EhGalleryDownloader.exe` 即可使用。
 
-1. 保持 Clash Verge 运行。
-2. 在 Chrome 中登录 E-Hentai / ExHentai。
-3. 在软件的“设置 → ExHentai 登录”中点击“首次安装扩展”，按说明加载随软件附带的 `BrowserExtension` 文件夹。
-4. 保持已登录网页打开，点击软件中的“从当前网页导入”，授权后再点击浏览器工具栏里的“画廊登录导入”。
+## 主要功能
 
-扩展只拥有 E-Hentai、ExHentai 和本机回环地址的访问范围，只传递 `ipb_member_id`、`ipb_pass_hash`、`igneous` 三项必要 Cookie。软件端会再次检查域名和字段，并通过两分钟有效的一次性本机通道接收；不会读取浏览器保存的密码、历史记录或其他网站信息，也不会将 Cookie 上传到互联网。
+- 一次粘贴一个或多个画廊链接，按队列顺序下载。
+- 实时显示当前文件、页数、速度、剩余时间和失败数量。
+- 停止后从本地第一个缺失页继续，不再从第一页逐张检查。
+- 支持原图、网站压缩图、画廊信息文件和 CBZ 打包。
+- 自动识别 Clash / Mihomo `mixed-port`，测速前主动刷新节点延迟。
+- 节点结果按完整传输成功率、断线次数、实际速度和延迟排序。
+- 临时网络故障可按测速排名自动换节点继续。
+- 同时保留手动 Cookie 和“从当前网页导入”两种登录方式。
+- 下载任务和进度自动保存，关闭软件后可以继续。
+- 适配 Windows 高 DPI，可选择 100%、110% 或 125% 界面大小。
 
-如果暂时不安装扩展，也可以继续使用手动填写，或尝试从本机浏览器资料读取。由于新版 Chrome/Edge 的应用绑定加密，本地资料读取不保证在所有版本中成功。
-5. 粘贴一个或多个画廊首页链接（每行一条），选择保存位置和图片质量，点击“开始下载”。
-6. 如果中途停止，直接再次点击“开始下载”或选中原任务点击“继续 / 补漏选中任务”即可。相同链接会继续原任务，不会不断创建重复任务。
+## 快速开始
 
-下载频繁断开时，点击“为当前画廊挑节点”，选择平时实际控制下载流量的策略组（通常是手动切换节点的那一组）。默认“智能快速筛选”会先调用 Mihomo 的整组延迟接口并发剔除真正断线的节点，再优先从各地区各取一个代表，随后补充低、中、高延迟节点，共保留约 15 个候选进行小流量真实图片下载。真实测速与正式下载使用同一个 gallery-dl 内核；单个节点超时只会标记该节点并继续，不会中断整轮。真实下载首次失败不会立即淘汰，程序会通过当前节点重新连接图片服务器并复测一次。需要彻底摸底时可选择“检测全部可用节点”。结果按完整传输成功率优先、实际速度其次排序；完成后可继续“精确复测前5名”。测试过程正常结束或停止时会恢复原节点；异常退出留下的恢复记录会在下次启动时自动处理。
+1. 解压完整包并运行 `EhGalleryDownloader.exe`。
+2. 保持 Clash Verge / Mihomo 正常运行。
+3. 在浏览器中登录 E-Hentai 或 ExHentai。
+4. 在软件“设置 → ExHentai 登录”中手动填写 Cookie，或按提示加载随软件附带的浏览器组件并从当前网页导入。
+5. 粘贴画廊链接，选择保存位置，点击“开始下载”。
 
-“自动识别端口（推荐）”会通过 Clash Verge 的 `verge-mihomo` 控制管道读取当前 `mixed-port`，并在启动、下载、Cookie 验证和内核更新前重新核对。识别失败时会保留输入框中的手动地址，不会修改 Clash 配置、系统代理或 TUN 虚拟网卡。
+更完整的下载、登录、续传和节点测试说明见 [使用指南](docs/USAGE.md)。Cookie 权限和本机数据处理方式见 [隐私与数据说明](docs/PRIVACY.md)。
 
-网页导入和手动 Cookie 方式都不读取浏览器密码库，因此 Chrome/Edge 可以一直保持运行。软件也保留了从 Edge / Chrome / Firefox 本地资料尝试读取登录信息，以及完全不登录的选项。新导入或填写的 Cookie 只有验证成功后才会覆盖本机加密副本，避免把格式正确但已经失效的 Cookie 保存下来。
+## 仓库结构
 
-“原图”会消耗更多流量，并受网站的图片额度 / GP 规则影响；额度不足时程序会自动回退到网站压缩图。程序保留 gallery-dl 对 E-Hentai 默认的请求间隔，不会为了追求表面速度而高频刷新页面。
-
-右上角“检查更新”通过普通官方发布页取得版本和 SHA-256，不使用容易触发 403 限流的 GitHub API。本地已经最新时不会下载文件；发现新版本后会显示当前版本和新版本，得到确认后才更新。检查或更新失败不会覆盖当前内核，也不会把所有错误误报成 Clash 端口问题。
-
-下载开始后，即使内核正在读取登录信息或等待慢网络，窗口也会保持响应，可随时点击“停止当前任务”。停止操作会等待子进程真正退出后再允许继续。成功文件由保存目录中的现有文件判断并跳过，未完成的 `.part` 文件会尽量续传；不再使用跨目录共用的全局下载档案，避免换保存位置或画质后误跳过文件。检测到确定性的内核兼容错误时，软件会要求先更新内核，防止同一错误无限重试。
-
-## 数据位置
-
-设置、任务队列、运行日志和旧版下载档案保存在：
-
-`%LOCALAPPDATA%\EhGalleryDownloader`
-
-旧版的 `download-archive.sqlite3` 会保留以便回退旧版本，但新版不再依赖它；删除与否都不会影响新版按现有文件继续下载。
-
-手动粘贴的 Cookie 默认自动使用 Windows DPAPI 加密，并保存到 `%LOCALAPPDATA%\EhGalleryDownloader\login-cookie.dat`，只能由当前 Windows 用户解密。粘贴有效格式的 Cookie 后会在短暂延迟后自动保存，关闭软件、升级程序、切换登录方式或暂时取消自动保存都不会删除已有加密副本；只有明确点击“清除”才会删除。运行时临时配置会在任务结束时删除，下次启动还会清理异常退出留下的临时配置；Cookie 不写入下载日志。
-
-Cookie 等同临时登录密码，不要发到聊天、截图或云端文档中。软件中的“清除”按钮会删除输入内容及本机加密副本。
+```text
+src/EhGalleryDownloader/                 WPF 主程序与浏览器组件
+tests/EhGalleryDownloader.IntegrationProbe/  集成测试
+docs/                                    使用和隐私说明
+.github/workflows/                       GitHub 自动构建检查
+CHANGELOG.md                             版本更新记录
+```
 
 ## 从源码构建
 
 需要 Windows 和 .NET 8 SDK：
 
 ```powershell
-dotnet build .\EhGalleryDownloader.csproj -c Release
-dotnet publish .\EhGalleryDownloader.csproj -c Release -r win-x64 --self-contained false -o .\dist
+dotnet build .\EhGalleryDownloader.sln -c Release
+dotnet run --project .\tests\EhGalleryDownloader.IntegrationProbe\EhGalleryDownloader.IntegrationProbe.csproj -c Release
+dotnet publish .\src\EhGalleryDownloader\EhGalleryDownloader.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o .\dist
 ```
 
-仓库不提交编译产物、用户 Cookie、运行日志和第三方 `gallery-dl.exe`。第一次启动时可点击右上角“安装内核”，程序会从 gallery-dl 官方 Windows 构建发布页下载并校验内核；也可以自行将 `gallery-dl.exe` 放入 `tools` 目录后重新构建。
+仓库不会提交编译产物、Cookie、本地设置、运行日志、验收下载内容或第三方二进制。源码构建后可以在软件内安装下载内核，也可以自行把 `gallery-dl.exe` 放入根目录的 `tools` 文件夹后重新发布。
 
-## 第三方许可
-
-见 `THIRD-PARTY-NOTICES.txt`。
+版本变化见 [CHANGELOG.md](CHANGELOG.md)，第三方许可见 [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt)。

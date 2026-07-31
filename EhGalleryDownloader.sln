@@ -1,0 +1,36 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{256D141B-2DEE-40FE-A27F-449E655C5A79}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EhGalleryDownloader", "src\EhGalleryDownloader\EhGalleryDownloader.csproj", "{C535D728-5F3F-413B-9078-165123930D07}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{021EBFB5-A5FB-43E9-9F51-E174D6192C4F}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EhGalleryDownloader.IntegrationProbe", "tests\EhGalleryDownloader.IntegrationProbe\EhGalleryDownloader.IntegrationProbe.csproj", "{7EEEF3CE-BE75-4E3E-A6DC-14229F487FEB}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{C535D728-5F3F-413B-9078-165123930D07}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C535D728-5F3F-413B-9078-165123930D07}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C535D728-5F3F-413B-9078-165123930D07}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C535D728-5F3F-413B-9078-165123930D07}.Release|Any CPU.Build.0 = Release|Any CPU
+		{7EEEF3CE-BE75-4E3E-A6DC-14229F487FEB}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{7EEEF3CE-BE75-4E3E-A6DC-14229F487FEB}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{7EEEF3CE-BE75-4E3E-A6DC-14229F487FEB}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{7EEEF3CE-BE75-4E3E-A6DC-14229F487FEB}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{C535D728-5F3F-413B-9078-165123930D07} = {256D141B-2DEE-40FE-A27F-449E655C5A79}
+		{7EEEF3CE-BE75-4E3E-A6DC-14229F487FEB} = {021EBFB5-A5FB-43E9-9F51-E174D6192C4F}
+	EndGlobalSection
+EndGlobal

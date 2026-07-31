@@ -15,20 +15,22 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
 
-  <ItemGroup Condition="Exists('tools\gallery-dl.exe')">
-    <Content Include="tools\gallery-dl.exe">
+  <ItemGroup Condition="Exists('..\..\tools\gallery-dl.exe')">
+    <Content Include="..\..\tools\gallery-dl.exe">
+      <Link>tools\gallery-dl.exe</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </Content>
   </ItemGroup>
-  <ItemGroup Condition="Exists('THIRD-PARTY-NOTICES.txt')">
-    <Content Include="THIRD-PARTY-NOTICES.txt">
+  <ItemGroup Condition="Exists('..\..\THIRD-PARTY-NOTICES.txt')">
+    <Content Include="..\..\THIRD-PARTY-NOTICES.txt">
+      <Link>THIRD-PARTY-NOTICES.txt</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </Content>
   </ItemGroup>
-  <ItemGroup Condition="!Exists('tools\gallery-dl.exe') And Exists('dist\tools\gallery-dl.exe')">
-    <Content Include="dist\tools\gallery-dl.exe">
+  <ItemGroup Condition="!Exists('..\..\tools\gallery-dl.exe') And Exists('..\..\dist\tools\gallery-dl.exe')">
+    <Content Include="..\..\dist\tools\gallery-dl.exe">
       <Link>tools\gallery-dl.exe</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
@@ -40,9 +42,5 @@
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
       <TargetPath>BrowserExtension\%(RecursiveDir)%(Filename)%(Extension)</TargetPath>
     </Content>
-  </ItemGroup>
-  <ItemGroup>
-    <Compile Remove="Tests\**\*.cs" />
-    <None Remove="Tests\**\*" />
   </ItemGroup>
 </Project>

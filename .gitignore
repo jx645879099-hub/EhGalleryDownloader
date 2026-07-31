@@ -1,10 +1,9 @@
 # Visual Studio / .NET build outputs
 bin/
 obj/
-Tests/bin/
-Tests/obj/
 .vs/
 TestResults/
+artifacts/
 *.user
 *.suo
 
