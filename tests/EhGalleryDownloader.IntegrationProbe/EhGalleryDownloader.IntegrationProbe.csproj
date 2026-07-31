@@ -6,6 +6,6 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="..\EhGalleryDownloader.csproj" />
+    <ProjectReference Include="..\..\src\EhGalleryDownloader\EhGalleryDownloader.csproj" />
   </ItemGroup>
 </Project>

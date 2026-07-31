@@ -3,7 +3,7 @@ using System.Security.Cryptography;
 using EhGalleryDownloader;
 
 var projectDirectory = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
-    "..", "..", "..", ".."));
+    "..", "..", "..", "..", ".."));
 var enginePath = new[]
 {
     Path.Combine(projectDirectory, "tools", "gallery-dl.exe"),
