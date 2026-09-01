@@ -11,10 +11,11 @@ public sealed class GalleryDlService : IDisposable
     private Process? _process;
     private readonly object _gate = new();
     private string _lastRawError = "";
-    private readonly Stopwatch _stopwatch = new();
+    private readonly DownloadProgressTracker _progressTracker = new();
     private readonly HashSet<string> _completedPaths = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _skippedPaths = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _failedPaths = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _processedPaths = new(StringComparer.OrdinalIgnoreCase);
     private long _downloadedBytes;
 
     public bool IsRunning
@@ -53,7 +54,8 @@ public sealed class GalleryDlService : IDisposable
         _completedPaths.Clear();
         _skippedPaths.Clear();
         _failedPaths.Clear();
-        _stopwatch.Restart();
+        _processedPaths.Clear();
+        _progressTracker.Reset();
 
         var resumePlan = GalleryResumePlanner.Create(job);
         if (resumePlan is not null)
@@ -61,7 +63,10 @@ public sealed class GalleryDlService : IDisposable
             ExistingPrefixDetected?.Invoke(resumePlan.ExistingPrefixCount);
             OutputReceived?.Invoke(
                 $"已在本地确认前 {resumePlan.ExistingPrefixCount} 张完整图片，"
-                + $"将直接从第 {resumePlan.StartIndex} 张继续。" );
+                + $"准备从第 {resumePlan.StartIndex} 张继续。" );
+            OutputReceived?.Invoke(resumePlan.Range is null
+                ? $"已定位第 {resumePlan.StartIndex} 张，正在直接读取断点处的画廊信息。"
+                : $"无法构造直接续传地址，将使用兼容模式从第 {resumePlan.StartIndex} 张继续。" );
         }
 
         var info = new ProcessStartInfo
@@ -78,7 +83,7 @@ public sealed class GalleryDlService : IDisposable
         ConfigureUtf8Output(info);
 
         AddCommonArguments(info, job, logPath, runConfigPath, progressPath, resumePlan);
-        info.ArgumentList.Add(job.Url);
+        info.ArgumentList.Add(resumePlan?.InputUrl ?? job.Url);
 
         using var process = new Process { StartInfo = info, EnableRaisingEvents = true };
         Task stdoutTask = Task.CompletedTask;
@@ -166,8 +171,8 @@ public sealed class GalleryDlService : IDisposable
         Add(info, "--http-timeout", "35");
         Add(info, "--retries", "4");
         Add(info, "--sleep-retries", "2.0-5.0");
-        if (resumePlan is not null)
-            Add(info, "--range", $"{resumePlan.StartIndex}-");
+        if (resumePlan?.Range is { } range)
+            Add(info, "--range", range);
         Add(info, "--option", "extractor.exhentai.fallback-retries=2");
         Add(info, "--option", "extractor.exhentai.gp=resized");
         Add(info, "--option", $"extractor.exhentai.original={job.Options.DownloadOriginal.ToString().ToLowerInvariant()}");
@@ -254,6 +259,7 @@ public sealed class GalleryDlService : IDisposable
                 case GalleryDlEventKind.Success:
                     if (_completedPaths.Add(marker.Path))
                     {
+                        _processedPaths.Add(marker.Path);
                         FileCompleted?.Invoke();
                         ReportProgress(marker, includeFileBytes: true);
                     }
@@ -261,12 +267,17 @@ public sealed class GalleryDlService : IDisposable
                 case GalleryDlEventKind.Skip:
                     if (_skippedPaths.Add(marker.Path))
                     {
+                        _processedPaths.Add(marker.Path);
                         FileSkipped?.Invoke();
                         ReportProgress(marker, includeFileBytes: false);
                     }
                     break;
                 case GalleryDlEventKind.Failure:
-                    if (_failedPaths.Add(marker.Path)) FileFailed?.Invoke();
+                    if (_failedPaths.Add(marker.Path))
+                    {
+                        _processedPaths.Add(marker.Path);
+                        FileFailed?.Invoke();
+                    }
                     ReportProgress(marker, includeFileBytes: false);
                     break;
             }
@@ -343,13 +354,11 @@ public sealed class GalleryDlService : IDisposable
             }
             catch { }
         }
-        var elapsed = _stopwatch.Elapsed.TotalSeconds;
-        var speed = elapsed > 0 ? _downloadedBytes / 1024d / 1024d / elapsed : 0;
-        TimeSpan? remaining = null;
-        if (marker.Current > 0 && marker.Total > marker.Current && elapsed > 0)
-            remaining = TimeSpan.FromSeconds(elapsed / marker.Current * (marker.Total - marker.Current));
-        ProgressChanged?.Invoke(new DownloadProgress(
-            marker.Current, marker.Total, speed, remaining));
+        ProgressChanged?.Invoke(_progressTracker.Record(
+            marker.Current,
+            marker.Total,
+            _downloadedBytes,
+            _processedPaths.Count));
     }
 
     private static string ShortenPath(string path)

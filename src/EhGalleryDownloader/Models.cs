@@ -77,7 +77,6 @@ public sealed class DownloadJob : INotifyPropertyChanged
         CompletedFiles = 0;
         SkippedFiles = 0;
         FailedFiles = 0;
-        TotalFiles = 0;
         SpeedMbPerSecond = 0;
         EstimatedRemaining = "—";
         CurrentFile = "—";

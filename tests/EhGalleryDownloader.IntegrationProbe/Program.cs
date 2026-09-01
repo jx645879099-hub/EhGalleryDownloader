@@ -193,7 +193,8 @@ var stoppedJob = new DownloadJob
     State = "已停止",
     CompletedFiles = 4,
     SkippedFiles = 3,
-    FailedFiles = 2
+    FailedFiles = 2,
+    TotalFiles = 837
 };
 var reusable = DownloadTaskLogic.FindReusable(
     [stoppedJob], continuationUrl.TrimEnd('/'));
@@ -206,9 +207,11 @@ stoppedJob.BeginAttempt();
 if (stoppedJob.AttemptCount != 1
     || stoppedJob.CompletedFiles != 0
     || stoppedJob.SkippedFiles != 0
-    || stoppedJob.FailedFiles != 0)
+    || stoppedJob.FailedFiles != 0
+    || stoppedJob.TotalFiles != 837)
 {
-    Console.Error.WriteLine("FAIL: continuing a task did not start a clean attempt.");
+    Console.Error.WriteLine(
+        "FAIL: continuing a task did not reset attempt counts while retaining the known total.");
     return 13;
 }
 stoppedJob.State = "已完成";
@@ -242,9 +245,12 @@ try
             "none", "edge", false, null, false, "", true, false, false, true)
     };
     var gapPlan = GalleryResumePlanner.Create(resumeJob);
-    if (gapPlan is not { StartIndex: 3, ExistingPrefixCount: 2 })
+    if (gapPlan is not { StartIndex: 3, ExistingPrefixCount: 2 }
+        || gapPlan.InputUrl != "https://exhentai.org/g/4089450/token/#page3"
+        || gapPlan.Range is not null)
     {
-        Console.Error.WriteLine("FAIL: fast resume did not stop at the first missing image.");
+        Console.Error.WriteLine(
+            "FAIL: fast resume did not build a direct continuation at the first missing image.");
         return 31;
     }
 
@@ -252,9 +258,12 @@ try
         Path.Combine(resumeTestRoot, "4089450_0003_hash_image.png"),
         [1, 2, 3]);
     var contiguousPlan = GalleryResumePlanner.Create(resumeJob);
-    if (contiguousPlan is not { StartIndex: 5, ExistingPrefixCount: 4 })
+    if (contiguousPlan is not { StartIndex: 5, ExistingPrefixCount: 4 }
+        || contiguousPlan.InputUrl != "https://exhentai.org/g/4089450/token/#page5"
+        || contiguousPlan.Range is not null)
     {
-        Console.Error.WriteLine("FAIL: fast resume did not skip the complete local prefix.");
+        Console.Error.WriteLine(
+            "FAIL: fast resume did not directly continue after the complete local prefix.");
         return 32;
     }
 
@@ -383,6 +392,48 @@ if (GalleryDlProcessEncoding.Current.CodePage != System.Text.Encoding.UTF8.CodeP
     return 30;
 }
 Console.WriteLine("PASS: gallery-dl output is decoded as UTF-8 on every Windows locale.");
+
+var resumedProgress = DownloadProgressCalculator.Calculate(
+    current: 218,
+    total: 837,
+    downloadedBytes: 1024L * 1024,
+    elapsedSeconds: 10,
+    processedFiles: 1);
+var waitingProgress = DownloadProgressCalculator.Calculate(
+    current: 218,
+    total: 837,
+    downloadedBytes: 0,
+    elapsedSeconds: 10,
+    processedFiles: 0);
+if (Math.Abs(resumedProgress.SpeedMbPerSecond - 0.1) > 0.0001
+    || resumedProgress.EstimatedRemaining?.TotalSeconds != 6190
+    || waitingProgress.EstimatedRemaining is not null)
+{
+    Console.Error.WriteLine(
+        "FAIL: resumed transfer speed or ETA includes setup time or uses the global image index.");
+    return 34;
+}
+Console.WriteLine(
+    "PASS: resumed speed and ETA use transfer time and files processed in this attempt.");
+
+var progressTracker = new DownloadProgressTracker();
+progressTracker.Reset();
+if (progressTracker.IsTransferStarted)
+{
+    Console.Error.WriteLine("FAIL: transfer timing started during resume setup.");
+    return 35;
+}
+_ = progressTracker.Record(
+    current: 218,
+    total: 837,
+    downloadedBytes: 0,
+    processedFiles: 0);
+if (!progressTracker.IsTransferStarted)
+{
+    Console.Error.WriteLine("FAIL: transfer timing did not start with the first file event.");
+    return 36;
+}
+Console.WriteLine("PASS: transfer timing starts with the first file event, not resume setup.");
 
 var displayJob = new DownloadJob
 {

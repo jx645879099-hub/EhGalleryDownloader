@@ -2,7 +2,11 @@ using System.Text.RegularExpressions;
 
 namespace EhGalleryDownloader;
 
-public sealed record GalleryResumePlan(int StartIndex, int ExistingPrefixCount);
+public sealed record GalleryResumePlan(
+    int StartIndex,
+    int ExistingPrefixCount,
+    string InputUrl,
+    string? Range);
 
 public static partial class GalleryResumePlanner
 {
@@ -48,9 +52,36 @@ public static partial class GalleryResumePlanner
 
         var firstMissing = 1;
         while (existing.Contains(firstMissing)) firstMissing++;
-        return firstMissing > 1
-            ? new GalleryResumePlan(firstMissing, firstMissing - 1)
-            : null;
+        if (firstMissing <= 1) return null;
+
+        var inputUrl = job.Url;
+        string? range = $"{firstMissing}-";
+        if (TryBuildContinuationUrl(job.Url, firstMissing, out var continuationUrl))
+        {
+            inputUrl = continuationUrl;
+            range = null;
+        }
+        return new GalleryResumePlan(firstMissing, firstMissing - 1, inputUrl, range);
+    }
+
+    private static bool TryBuildContinuationUrl(
+        string url,
+        int startIndex,
+        out string continuationUrl)
+    {
+        continuationUrl = "";
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) return false;
+
+        try
+        {
+            var builder = new UriBuilder(uri) { Fragment = $"page{startIndex}" };
+            continuationUrl = builder.Uri.AbsoluteUri;
+            return true;
+        }
+        catch (UriFormatException)
+        {
+            return false;
+        }
     }
 
     private static bool TryGetGalleryId(string url, out string galleryId)
