@@ -6,7 +6,8 @@ public sealed record GalleryResumePlan(
     int StartIndex,
     int ExistingPrefixCount,
     string InputUrl,
-    string? Range);
+    string? Range,
+    bool AlreadyComplete = false);
 
 public static partial class GalleryResumePlanner
 {
@@ -54,9 +55,14 @@ public static partial class GalleryResumePlanner
         while (existing.Contains(firstMissing)) firstMissing++;
         if (firstMissing <= 1) return null;
 
+        if (job.TotalFiles > 0 && firstMissing > job.TotalFiles)
+            return new GalleryResumePlan(
+                firstMissing, firstMissing - 1, job.Url, null, AlreadyComplete: true);
+
         var inputUrl = job.Url;
         string? range = $"{firstMissing}-";
-        if (TryBuildContinuationUrl(job.Url, firstMissing, out var continuationUrl))
+        if (job.TotalFiles > 0
+            && TryBuildContinuationUrl(job.Url, firstMissing, out var continuationUrl))
         {
             inputUrl = continuationUrl;
             range = null;

@@ -644,19 +644,19 @@ public partial class MainWindow : Window
             job.Details = $"正在处理：{file}";
             RefreshSelectedDetails();
         });
-        _service.FileCompleted += () => RunOnUi(() =>
+        _service.FileCompleted += delta => RunOnUi(() =>
         {
-            job.CompletedFiles++;
+            job.CompletedFiles = Math.Max(0, job.CompletedFiles + delta);
             RefreshCounts(job);
         });
-        _service.FileSkipped += () => RunOnUi(() =>
+        _service.FileSkipped += delta => RunOnUi(() =>
         {
-            job.SkippedFiles++;
+            job.SkippedFiles = Math.Max(0, job.SkippedFiles + delta);
             RefreshCounts(job);
         });
-        _service.FileFailed += () => RunOnUi(() =>
+        _service.FileFailed += delta => RunOnUi(() =>
         {
-            job.FailedFiles++;
+            job.FailedFiles = Math.Max(0, job.FailedFiles + delta);
             RefreshCounts(job);
         });
         _service.OutputReceived += line => RunOnUi(() =>

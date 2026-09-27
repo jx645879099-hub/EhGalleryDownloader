@@ -241,6 +241,7 @@ try
     {
         Url = "https://exhentai.org/g/4089450/token/",
         OutputDirectory = resumeTestRoot,
+        TotalFiles = 5,
         Options = new DownloadOptions(
             "none", "edge", false, null, false, "", true, false, false, true)
     };
@@ -265,6 +266,35 @@ try
         Console.Error.WriteLine(
             "FAIL: fast resume did not directly continue after the complete local prefix.");
         return 32;
+    }
+
+    resumeJob.TotalFiles = 4;
+    var completePlan = GalleryResumePlanner.Create(resumeJob);
+    if (completePlan is not { AlreadyComplete: true, ExistingPrefixCount: 4 })
+    {
+        Console.Error.WriteLine("FAIL: a fully downloaded gallery must not request a nonexistent next page.");
+        return 37;
+    }
+    using (var completeService = new GalleryDlService())
+    {
+        var knownPrefix = 0;
+        completeService.ExistingPrefixDetected += count => knownPrefix = count;
+        var completeExit = await completeService.RunAsync(
+            "missing-gallery-dl.exe", resumeJob, CancellationToken.None);
+        if (completeExit != 0 || knownPrefix != 4)
+        {
+            Console.Error.WriteLine("FAIL: a complete local gallery still launched the engine.");
+            return 38;
+        }
+    }
+
+    resumeJob.TotalFiles = 0;
+    var unknownTotalPlan = GalleryResumePlanner.Create(resumeJob);
+    if (unknownTotalPlan is not { AlreadyComplete: false, Range: "5-" }
+        || unknownTotalPlan.InputUrl != resumeJob.Url)
+    {
+        Console.Error.WriteLine("FAIL: unknown gallery total did not use the safe compatibility path.");
+        return 39;
     }
 
     resumeJob.Options = resumeJob.Options with { PackageAsCbz = true };
@@ -416,6 +446,35 @@ if (Math.Abs(resumedProgress.SpeedMbPerSecond - 0.1) > 0.0001
 Console.WriteLine(
     "PASS: resumed speed and ETA use transfer time and files processed in this attempt.");
 
+var accountingRoot = Path.Combine(outputPath, "resume-accounting-" + Guid.NewGuid().ToString("N"));
+Directory.CreateDirectory(accountingRoot);
+try
+{
+    var filePath = Path.Combine(accountingRoot, "page.jpg");
+    File.WriteAllBytes(filePath + ".part", new byte[9]);
+    var accounting = new DownloadTransferAccounting();
+    accounting.RecordPrepare(filePath);
+    File.WriteAllBytes(filePath, new byte[10]);
+    if (!accounting.TryRecordTerminal(GalleryDlEventKind.Failure, filePath, out var previous)
+        || previous is not null
+        || !accounting.TryRecordTerminal(GalleryDlEventKind.Success, filePath, out previous)
+        || previous != GalleryDlEventKind.Failure
+        || accounting.TryRecordTerminal(GalleryDlEventKind.Skip, filePath, out _)
+        || accounting.TryRecordTerminal(GalleryDlEventKind.Success, filePath, out _)
+        || accounting.ProcessedFiles != 1
+        || accounting.DownloadedBytes != 1)
+    {
+        Console.Error.WriteLine(
+            "FAIL: duplicate outcomes or preexisting .part bytes distorted progress.");
+        return 40;
+    }
+}
+finally
+{
+    try { Directory.Delete(accountingRoot, recursive: true); } catch { }
+}
+Console.WriteLine("PASS: terminal outcomes are deduplicated and preexisting .part bytes excluded.");
+
 var progressTracker = new DownloadProgressTracker();
 progressTracker.Reset();
 if (progressTracker.IsTransferStarted)
@@ -472,7 +531,7 @@ if (args.Contains("--progress-only", StringComparer.OrdinalIgnoreCase))
         var greatestTotal = 0;
         var observedPaths = new List<string>();
         var displayLines = new List<string>();
-        progressService.FileCompleted += () => completedEvents++;
+        progressService.FileCompleted += delta => completedEvents += delta;
         progressService.ProgressChanged += value =>
             greatestTotal = Math.Max(greatestTotal, value.Total);
         progressService.CurrentFileChanged += value => observedPaths.Add(value);
@@ -486,7 +545,8 @@ if (args.Contains("--progress-only", StringComparer.OrdinalIgnoreCase))
         };
         var exitCode = await progressService.RunAsync(
             enginePath, progressJob, CancellationToken.None);
-        if (exitCode != 0 || completedEvents <= 0 || greatestTotal <= 0
+        // A single Wikimedia file may not expose gallery-wide filecount metadata.
+        if (exitCode != 0 || completedEvents <= 0
             || observedPaths.Count == 0
             || observedPaths.Any(value => value.Contains('\uFFFD'))
             || displayLines.Any(value => value.Contains('\uFFFD')))
@@ -494,7 +554,9 @@ if (args.Contains("--progress-only", StringComparer.OrdinalIgnoreCase))
             Console.Error.WriteLine(
                 $"FAIL: live gallery-dl progress events were not captured "
                 + $"without encoding damage (exit={exitCode}, completed={completedEvents}, "
-                + $"total={greatestTotal}, paths={observedPaths.Count}). "
+                + $"total={greatestTotal}, paths={observedPaths.Count}, "
+                + $"badPaths={observedPaths.Count(value => value.Contains('\uFFFD'))}, "
+                + $"badOutput={displayLines.Count(value => value.Contains('\uFFFD'))}). "
                 + $"Last output: {string.Join(" | ", displayLines.TakeLast(4))}");
             return 26;
         }

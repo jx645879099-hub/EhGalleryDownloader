@@ -12,11 +12,7 @@ public sealed class GalleryDlService : IDisposable
     private readonly object _gate = new();
     private string _lastRawError = "";
     private readonly DownloadProgressTracker _progressTracker = new();
-    private readonly HashSet<string> _completedPaths = new(StringComparer.OrdinalIgnoreCase);
-    private readonly HashSet<string> _skippedPaths = new(StringComparer.OrdinalIgnoreCase);
-    private readonly HashSet<string> _failedPaths = new(StringComparer.OrdinalIgnoreCase);
-    private readonly HashSet<string> _processedPaths = new(StringComparer.OrdinalIgnoreCase);
-    private long _downloadedBytes;
+    private readonly DownloadTransferAccounting _accounting = new();
 
     public bool IsRunning
     {
@@ -32,9 +28,9 @@ public sealed class GalleryDlService : IDisposable
     public event Action<string>? CurrentFileChanged;
     public event Action<string, int>? GalleryMetadataChanged;
     public event Action<int>? ExistingPrefixDetected;
-    public event Action? FileCompleted;
-    public event Action? FileSkipped;
-    public event Action? FileFailed;
+    public event Action<int>? FileCompleted;
+    public event Action<int>? FileSkipped;
+    public event Action<int>? FileFailed;
     public event Action<DownloadProgress>? ProgressChanged;
 
     public async Task<int> RunAsync(string enginePath, DownloadJob job, CancellationToken cancellationToken)
@@ -45,29 +41,32 @@ public sealed class GalleryDlService : IDisposable
 
         var logPath = Path.Combine(SettingsStore.LogDirectory,
             $"{DateTime.Now:yyyyMMdd-HHmmss}-{job.Id:N}.log");
-        var runConfigPath = CreateRunConfig(job);
         var progressPath = Path.Combine(SettingsStore.DataDirectory,
             $"progress-{job.Id:N}.log");
         try { File.Delete(progressPath); } catch { }
         _lastRawError = "";
-        _downloadedBytes = 0;
-        _completedPaths.Clear();
-        _skippedPaths.Clear();
-        _failedPaths.Clear();
-        _processedPaths.Clear();
+        _accounting.Reset();
         _progressTracker.Reset();
 
         var resumePlan = GalleryResumePlanner.Create(job);
         if (resumePlan is not null)
         {
             ExistingPrefixDetected?.Invoke(resumePlan.ExistingPrefixCount);
+            if (resumePlan.AlreadyComplete)
+            {
+                OutputReceived?.Invoke(
+                    $"本地前 {resumePlan.ExistingPrefixCount} 张图片齐全，已达到已知总页数。" );
+                return cancellationToken.IsCancellationRequested ? -1 : 0;
+            }
             OutputReceived?.Invoke(
                 $"已在本地确认前 {resumePlan.ExistingPrefixCount} 张完整图片，"
                 + $"准备从第 {resumePlan.StartIndex} 张继续。" );
             OutputReceived?.Invoke(resumePlan.Range is null
                 ? $"已定位第 {resumePlan.StartIndex} 张，正在直接读取断点处的画廊信息。"
-                : $"无法构造直接续传地址，将使用兼容模式从第 {resumePlan.StartIndex} 张继续。" );
+                : $"总页数未知或无法直接定位，将使用兼容模式从第 {resumePlan.StartIndex} 张继续。" );
         }
+
+        var runConfigPath = CreateRunConfig(job);
 
         var info = new ProcessStartInfo
         {
@@ -254,31 +253,19 @@ public sealed class GalleryDlService : IDisposable
             switch (marker.Kind)
             {
                 case GalleryDlEventKind.Prepare:
-                    ReportProgress(marker, includeFileBytes: false);
+                    _accounting.RecordPrepare(marker.Path);
+                    ReportProgress(marker);
                     break;
                 case GalleryDlEventKind.Success:
-                    if (_completedPaths.Add(marker.Path))
-                    {
-                        _processedPaths.Add(marker.Path);
-                        FileCompleted?.Invoke();
-                        ReportProgress(marker, includeFileBytes: true);
-                    }
-                    break;
                 case GalleryDlEventKind.Skip:
-                    if (_skippedPaths.Add(marker.Path))
-                    {
-                        _processedPaths.Add(marker.Path);
-                        FileSkipped?.Invoke();
-                        ReportProgress(marker, includeFileBytes: false);
-                    }
-                    break;
                 case GalleryDlEventKind.Failure:
-                    if (_failedPaths.Add(marker.Path))
+                    if (_accounting.TryRecordTerminal(
+                            marker.Kind, marker.Path, out var previous))
                     {
-                        _processedPaths.Add(marker.Path);
-                        FileFailed?.Invoke();
+                        if (previous is { } old) ReportFileDelta(old, -1);
+                        ReportFileDelta(marker.Kind, 1);
+                        ReportProgress(marker);
                     }
-                    ReportProgress(marker, includeFileBytes: false);
                     break;
             }
             return;
@@ -343,22 +330,23 @@ public sealed class GalleryDlService : IDisposable
         catch (UnauthorizedAccessException) { }
     }
 
-    private void ReportProgress(GalleryDlEvent marker, bool includeFileBytes)
+    private void ReportFileDelta(GalleryDlEventKind kind, int delta)
     {
-        if (includeFileBytes)
+        switch (kind)
         {
-            try
-            {
-                if (File.Exists(marker.Path))
-                    _downloadedBytes += new FileInfo(marker.Path).Length;
-            }
-            catch { }
+            case GalleryDlEventKind.Success: FileCompleted?.Invoke(delta); break;
+            case GalleryDlEventKind.Skip: FileSkipped?.Invoke(delta); break;
+            case GalleryDlEventKind.Failure: FileFailed?.Invoke(delta); break;
         }
+    }
+
+    private void ReportProgress(GalleryDlEvent marker)
+    {
         ProgressChanged?.Invoke(_progressTracker.Record(
             marker.Current,
             marker.Total,
-            _downloadedBytes,
-            _processedPaths.Count));
+            _accounting.DownloadedBytes,
+            _accounting.ProcessedFiles));
     }
 
     private static string ShortenPath(string path)
