@@ -11,6 +11,7 @@ public sealed class GalleryDlService : IDisposable
     private Process? _process;
     private readonly object _gate = new();
     private string _lastRawError = "";
+    private int _resumeAnchorIndex;
     private readonly DownloadProgressTracker _progressTracker = new();
     private readonly DownloadTransferAccounting _accounting = new();
 
@@ -23,6 +24,7 @@ public sealed class GalleryDlService : IDisposable
     }
 
     public string LastRawError => _lastRawError;
+    public bool LastRunUsedImageAnchor => _resumeAnchorIndex > 0;
 
     public event Action<string>? OutputReceived;
     public event Action<string>? CurrentFileChanged;
@@ -33,7 +35,11 @@ public sealed class GalleryDlService : IDisposable
     public event Action<int>? FileFailed;
     public event Action<DownloadProgress>? ProgressChanged;
 
-    public async Task<int> RunAsync(string enginePath, DownloadJob job, CancellationToken cancellationToken)
+    public async Task<int> RunAsync(
+        string enginePath,
+        DownloadJob job,
+        CancellationToken cancellationToken,
+        bool compatibilityResume = false)
     {
         Directory.CreateDirectory(job.OutputDirectory);
         Directory.CreateDirectory(SettingsStore.DataDirectory);
@@ -47,8 +53,20 @@ public sealed class GalleryDlService : IDisposable
         _lastRawError = "";
         _accounting.Reset();
         _progressTracker.Reset();
+        _resumeAnchorIndex = 0;
 
-        var resumePlan = GalleryResumePlanner.Create(job);
+        GalleryResumePlan? resumePlan;
+        try
+        {
+            resumePlan = await Task.Run(
+                () => GalleryResumePlanner.Create(job, compatibilityResume, cancellationToken),
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return -1;
+        }
+        _resumeAnchorIndex = resumePlan?.AnchorIndex ?? 0;
         if (resumePlan is not null)
         {
             ExistingPrefixDetected?.Invoke(resumePlan.ExistingPrefixCount);
@@ -61,9 +79,9 @@ public sealed class GalleryDlService : IDisposable
             OutputReceived?.Invoke(
                 $"已在本地确认前 {resumePlan.ExistingPrefixCount} 张完整图片，"
                 + $"准备从第 {resumePlan.StartIndex} 张继续。" );
-            OutputReceived?.Invoke(resumePlan.Range is null
-                ? $"已定位第 {resumePlan.StartIndex} 张，正在直接读取断点处的画廊信息。"
-                : $"总页数未知或无法直接定位，将使用兼容模式从第 {resumePlan.StartIndex} 张继续。" );
+            OutputReceived?.Invoke(resumePlan.AnchorIndex > 0
+                ? $"正在通过第 {resumePlan.AnchorIndex} 张已完成图片快速进入断点。"
+                : $"正在使用兼容模式从第 {resumePlan.StartIndex} 张继续；定位阶段可能较慢。" );
         }
 
         var runConfigPath = CreateRunConfig(job);
@@ -259,6 +277,8 @@ public sealed class GalleryDlService : IDisposable
                 case GalleryDlEventKind.Success:
                 case GalleryDlEventKind.Skip:
                 case GalleryDlEventKind.Failure:
+                    // The existing anchor was already included in the local prefix.
+                    if (marker.Current == _resumeAnchorIndex) break;
                     if (_accounting.TryRecordTerminal(
                             marker.Kind, marker.Path, out var previous))
                     {

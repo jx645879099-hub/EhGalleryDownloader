@@ -247,20 +247,46 @@ try
     };
     var gapPlan = GalleryResumePlanner.Create(resumeJob);
     if (gapPlan is not { StartIndex: 3, ExistingPrefixCount: 2 }
-        || gapPlan.InputUrl != "https://exhentai.org/g/4089450/token/#page3"
-        || gapPlan.Range is not null)
+        || gapPlan.InputUrl != resumeJob.Url
+        || gapPlan.Range != "3-"
+        || gapPlan.AnchorIndex != 0)
     {
         Console.Error.WriteLine(
-            "FAIL: fast resume did not build a direct continuation at the first missing image.");
+            "FAIL: a missing image token must use compatibility resume.");
         return 31;
+    }
+
+    File.WriteAllBytes(
+        Path.Combine(resumeTestRoot, "4089450_0002_abcdef1234_image.png"),
+        [1, 2, 3]);
+    var anchoredGapPlan = GalleryResumePlanner.Create(resumeJob);
+    if (anchoredGapPlan is not { StartIndex: 3, ExistingPrefixCount: 2, AnchorIndex: 2 }
+        || anchoredGapPlan.InputUrl != "https://exhentai.org/s/abcdef1234/4089450-2"
+        || anchoredGapPlan.Range is not null)
+    {
+        Console.Error.WriteLine(
+            "FAIL: fast resume did not use the last complete image token.");
+        return 40;
+    }
+    var compatibleGapPlan = GalleryResumePlanner.Create(resumeJob, compatibilityMode: true);
+    if (compatibleGapPlan is not { StartIndex: 3, AnchorIndex: 0, Range: "3-" }
+        || compatibleGapPlan.InputUrl != resumeJob.Url
+        || !GalleryResumePlanner.IsImageAnchorUnavailable(
+            "[exhentai][error] NotFoundError: Requested image page could not be found"))
+    {
+        Console.Error.WriteLine("FAIL: invalid image anchors do not fall back safely.");
+        return 41;
     }
 
     File.WriteAllBytes(
         Path.Combine(resumeTestRoot, "4089450_0003_hash_image.png"),
         [1, 2, 3]);
+    File.WriteAllBytes(
+        Path.Combine(resumeTestRoot, "4089450_0004_123456abcd_image.png"),
+        [1, 2, 3]);
     var contiguousPlan = GalleryResumePlanner.Create(resumeJob);
-    if (contiguousPlan is not { StartIndex: 5, ExistingPrefixCount: 4 }
-        || contiguousPlan.InputUrl != "https://exhentai.org/g/4089450/token/#page5"
+    if (contiguousPlan is not { StartIndex: 5, ExistingPrefixCount: 4, AnchorIndex: 4 }
+        || contiguousPlan.InputUrl != "https://exhentai.org/s/123456abcd/4089450-4"
         || contiguousPlan.Range is not null)
     {
         Console.Error.WriteLine(
@@ -290,10 +316,10 @@ try
 
     resumeJob.TotalFiles = 0;
     var unknownTotalPlan = GalleryResumePlanner.Create(resumeJob);
-    if (unknownTotalPlan is not { AlreadyComplete: false, Range: "5-" }
-        || unknownTotalPlan.InputUrl != resumeJob.Url)
+    if (unknownTotalPlan is not { AlreadyComplete: false, AnchorIndex: 4, Range: null }
+        || unknownTotalPlan.InputUrl != "https://exhentai.org/s/123456abcd/4089450-4")
     {
-        Console.Error.WriteLine("FAIL: unknown gallery total did not use the safe compatibility path.");
+        Console.Error.WriteLine("FAIL: unknown gallery total did not use the available image anchor.");
         return 39;
     }
 

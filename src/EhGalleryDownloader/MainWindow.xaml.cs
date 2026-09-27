@@ -45,6 +45,7 @@ public partial class MainWindow : Window
     private bool _isNodeTesting;
     private bool _syncingCookieInputs;
     private bool _isQueueRunning;
+    private bool _isPreparingResume;
     private bool _stopQueueRequested;
     private bool _composerExpandedWhileBusy;
     private string? _verifiedManualCookie;
@@ -541,17 +542,33 @@ public partial class MainWindow : Window
 
     private async void RetryButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_runningJob is not null || JobsGrid.SelectedItem is not DownloadJob selected) return;
-        await RefreshAutoDetectedProxyAsync(showStatus: false);
-        if (!TryValidateInputs(selected.Url, out var message, selected.OutputDirectory))
+        if (_runningJob is not null || _isPreparingResume
+            || JobsGrid.SelectedItem is not DownloadJob selected) return;
+        _isPreparingResume = true;
+        RetryButton.IsEnabled = false;
+        ActivityProgressBar.Visibility = Visibility.Visible;
+        ActivityProgressBar.IsIndeterminate = true;
+        selected.Details = "已收到继续请求，正在检查连接并定位本地断点…";
+        FooterStatusText.Text = selected.Details;
+        RefreshSelectedDetails();
+        try
         {
-            MessageBox.Show(message, "无法继续", MessageBoxButton.OK, MessageBoxImage.Information);
-            return;
+            await Dispatcher.Yield(DispatcherPriority.Background);
+            await RefreshAutoDetectedProxyAsync(showStatus: false);
+            if (!TryValidateInputs(selected.Url, out var message, selected.OutputDirectory))
+            {
+                MessageBox.Show(message, "无法继续", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            if (!ConfirmBrowserCookieAccess()) return;
+            RefreshRetryOptions(selected);
+            await RunJobAsync(selected);
         }
-        if (!ConfirmBrowserCookieAccess())
-            return;
-        RefreshRetryOptions(selected);
-        await RunJobAsync(selected);
+        finally
+        {
+            _isPreparingResume = false;
+            if (_runningJob is null) SetRunningUi(false);
+        }
     }
 
     private DownloadJob CreateJob(string url)
@@ -696,13 +713,15 @@ public partial class MainWindow : Window
         {
             var attemptedNodes = new HashSet<string>(StringComparer.Ordinal);
             var automaticSwitches = 0;
+            var compatibilityResume = false;
             var automaticSwitchLimit = GetSelectedTag(
                 AutoFailoverModeComboBox, "top3") == "all"
                 ? int.MaxValue
                 : 3;
             while (true)
             {
-                var exitCode = await _service.RunAsync(engine, job, _downloadCancellation.Token);
+                var exitCode = await _service.RunAsync(
+                    engine, job, _downloadCancellation.Token, compatibilityResume);
                 if (_downloadCancellation.IsCancellationRequested || exitCode == -1)
                 {
                     job.FinishedAt = DateTime.Now;
@@ -720,6 +739,18 @@ public partial class MainWindow : Window
                         : $"下载完成，共完成 {job.CompletedFiles} 个文件。";
                     FooterStatusText.Text = "下载完成。";
                     break;
+                }
+                if (!compatibilityResume
+                    && _service.LastRunUsedImageAnchor
+                    && GalleryResumePlanner.IsImageAnchorUnavailable(_service.LastRawError))
+                {
+                    compatibilityResume = true;
+                    job.BeginAttempt();
+                    job.State = "自动续传";
+                    job.Details = "快速断点入口失效，已自动改用兼容续传；定位旧页期间可能较慢。";
+                    FooterStatusText.Text = job.Details;
+                    SaveJobs();
+                    continue;
                 }
                 if (_service.LastRawError.Contains(
                         "KeyError - 'i3'", StringComparison.OrdinalIgnoreCase))
@@ -792,7 +823,8 @@ public partial class MainWindow : Window
 
     private async void ContinueAllButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_runningJob is not null || _isQueueRunning || _isNodeTesting) return;
+        if (_runningJob is not null || _isQueueRunning || _isNodeTesting
+            || _isPreparingResume) return;
         var firstPending = Jobs.FirstOrDefault(job => job.State != "已完成");
         if (firstPending is null)
         {
@@ -800,29 +832,42 @@ public partial class MainWindow : Window
                 MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
-        await RefreshAutoDetectedProxyAsync(showStatus: false);
-        if (!TryValidateInputs(firstPending.Url, out var message, firstPending.OutputDirectory))
+        _isPreparingResume = true;
+        ActivityProgressBar.Visibility = Visibility.Visible;
+        ActivityProgressBar.IsIndeterminate = true;
+        FooterStatusText.Text = "已收到继续全部请求，正在检查连接和待续任务…";
+        try
         {
-            MessageBox.Show(message, "无法继续队列", MessageBoxButton.OK, MessageBoxImage.Information);
-            return;
+            await Dispatcher.Yield(DispatcherPriority.Background);
+            await RefreshAutoDetectedProxyAsync(showStatus: false);
+            if (!TryValidateInputs(firstPending.Url, out var message, firstPending.OutputDirectory))
+            {
+                MessageBox.Show(message, "无法继续队列", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            foreach (var job in Jobs.Where(job => job.State != "已完成"))
+            {
+                if (TryValidateInputs(job.Url, out message, job.OutputDirectory)) continue;
+                MessageBox.Show(message, "无法继续队列", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            if (!ConfirmBrowserCookieAccess()) return;
+            var queue = Jobs.Where(job => job.State is not "已完成" and not "下载中")
+                .ToList();
+            foreach (var job in queue)
+            {
+                RefreshRetryOptions(job);
+                job.State = "排队中";
+                job.Details = "已加入继续下载队列。";
+            }
+            SaveJobs();
+            await RunQueuedJobsAsync(queue);
         }
-        foreach (var job in Jobs.Where(job => job.State != "已完成"))
+        finally
         {
-            if (TryValidateInputs(job.Url, out message, job.OutputDirectory)) continue;
-            MessageBox.Show(message, "无法继续队列", MessageBoxButton.OK, MessageBoxImage.Information);
-            return;
+            _isPreparingResume = false;
+            if (_runningJob is null) SetRunningUi(false);
         }
-        if (!ConfirmBrowserCookieAccess()) return;
-        var queue = Jobs.Where(job => job.State is not "已完成" and not "下载中")
-            .ToList();
-        foreach (var job in queue)
-        {
-            RefreshRetryOptions(job);
-            job.State = "排队中";
-            job.Details = "已加入继续下载队列。";
-        }
-        SaveJobs();
-        await RunQueuedJobsAsync(queue);
     }
 
     private void RemoveSelectedJobButton_Click(object sender, RoutedEventArgs e)

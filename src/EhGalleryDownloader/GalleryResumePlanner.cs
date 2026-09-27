@@ -7,15 +7,23 @@ public sealed record GalleryResumePlan(
     int ExistingPrefixCount,
     string InputUrl,
     string? Range,
-    bool AlreadyComplete = false);
+    bool AlreadyComplete = false,
+    int AnchorIndex = 0);
 
 public static partial class GalleryResumePlanner
 {
+    public static bool IsImageAnchorUnavailable(string rawError) =>
+        rawError.Contains("NotFoundError: Requested image page could not be found",
+            StringComparison.OrdinalIgnoreCase);
+
     private static readonly HashSet<string> ImageExtensions = new(
         [".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".avif"],
         StringComparer.OrdinalIgnoreCase);
 
-    public static GalleryResumePlan? Create(DownloadJob job)
+    public static GalleryResumePlan? Create(
+        DownloadJob job,
+        bool compatibilityMode = false,
+        CancellationToken cancellationToken = default)
     {
         if (job.Options.PackageAsCbz
             || !Directory.Exists(job.OutputDirectory)
@@ -23,6 +31,7 @@ public static partial class GalleryResumePlanner
             return null;
 
         var existing = new HashSet<int>();
+        var imageTokens = new Dictionary<int, string>();
         try
         {
             foreach (var path in Directory.EnumerateFiles(
@@ -30,6 +39,7 @@ public static partial class GalleryResumePlanner
                          $"{galleryId}_*",
                          SearchOption.AllDirectories))
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var extension = Path.GetExtension(path);
                 if (!ImageExtensions.Contains(extension)) continue;
 
@@ -46,6 +56,9 @@ public static partial class GalleryResumePlanner
                     || index <= 0)
                     continue;
                 existing.Add(index);
+                var tokenMatch = ImageTokenRegex().Match(file.Name);
+                if (tokenMatch.Success)
+                    imageTokens.TryAdd(index, tokenMatch.Groups["token"].Value);
             }
         }
         catch (IOException) { return null; }
@@ -61,18 +74,25 @@ public static partial class GalleryResumePlanner
 
         var inputUrl = job.Url;
         string? range = $"{firstMissing}-";
-        if (job.TotalFiles > 0
-            && TryBuildContinuationUrl(job.Url, firstMissing, out var continuationUrl))
+        var anchorIndex = firstMissing - 1;
+        if (!compatibilityMode
+            && imageTokens.TryGetValue(anchorIndex, out var imageToken)
+            && TryBuildContinuationUrl(
+                job.Url, galleryId, anchorIndex, imageToken, out var continuationUrl))
         {
             inputUrl = continuationUrl;
             range = null;
+            return new GalleryResumePlan(
+                firstMissing, anchorIndex, inputUrl, range, AnchorIndex: anchorIndex);
         }
         return new GalleryResumePlan(firstMissing, firstMissing - 1, inputUrl, range);
     }
 
     private static bool TryBuildContinuationUrl(
         string url,
-        int startIndex,
+        string galleryId,
+        int anchorIndex,
+        string imageToken,
         out string continuationUrl)
     {
         continuationUrl = "";
@@ -80,7 +100,12 @@ public static partial class GalleryResumePlanner
 
         try
         {
-            var builder = new UriBuilder(uri) { Fragment = $"page{startIndex}" };
+            var builder = new UriBuilder(uri)
+            {
+                Path = $"/s/{imageToken}/{galleryId}-{anchorIndex}",
+                Query = "",
+                Fragment = ""
+            };
             continuationUrl = builder.Uri.AbsoluteUri;
             return true;
         }
@@ -104,4 +129,7 @@ public static partial class GalleryResumePlanner
 
     [GeneratedRegex("^(?<gid>\\d+)_(?<index>\\d+)_", RegexOptions.CultureInvariant)]
     private static partial Regex NumberedFileRegex();
+
+    [GeneratedRegex("^\\d+_\\d+_(?<token>[0-9a-fA-F]{10})_", RegexOptions.CultureInvariant)]
+    private static partial Regex ImageTokenRegex();
 }
