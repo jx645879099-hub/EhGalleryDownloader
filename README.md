@@ -6,6 +6,8 @@
 
 面向 Windows 的中文 E-Hentai / ExHentai 下载工具，以 `gallery-dl` 为下载内核，提供任务队列、断点续传、Clash 节点实测和图形化操作界面。
 
+当前源码版本为 **1.1.3**。GitHub Releases 的下载包单独发布，可能与源码版本不同；程序左下角显示实际运行版本。
+
 ## 下载
 
 **[下载最新版 Windows 64 位完整包](https://github.com/jx645879099-hub/EhGalleryDownloader/releases/latest)**
@@ -16,7 +18,8 @@
 
 - 一次粘贴一个或多个画廊链接，按队列顺序下载。
 - 实时显示当前文件、页数、速度、剩余时间和失败数量。
-- 停止后从本地第一个缺失页继续，不再从第一页逐张检查。
+- 暂停后定位本地第一个缺失页，优先使用已下载图片的令牌快速续传；令牌失效或不可用时退回较慢的兼容方式。
+- 下载中心优先显示待处理任务，直接显示继续按钮和失败说明；完整记录仍保留在“下载记录”。
 - 支持原图、网站压缩图、画廊信息文件和 CBZ 打包。
 - 自动识别 Clash / Mihomo `mixed-port`，测速前主动刷新节点延迟。
 - 节点结果按完整传输成功率、断线次数、实际速度和延迟排序。
@@ -51,7 +54,7 @@ CHANGELOG.md                             版本更新记录
 
 ```powershell
 dotnet build .\EhGalleryDownloader.sln -c Release
-dotnet run --project .\tests\EhGalleryDownloader.IntegrationProbe\EhGalleryDownloader.IntegrationProbe.csproj -c Release
+dotnet run --project .\tests\EhGalleryDownloader.IntegrationProbe\EhGalleryDownloader.IntegrationProbe.csproj -c Release -- --unit-only
 dotnet publish .\src\EhGalleryDownloader\EhGalleryDownloader.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o .\dist
 ```
 

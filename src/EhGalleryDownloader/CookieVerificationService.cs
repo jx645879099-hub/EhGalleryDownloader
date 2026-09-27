@@ -22,7 +22,8 @@ public static class CookieVerificationService
         {
             AllowAutoRedirect = false,
             AutomaticDecompression = DecompressionMethods.All,
-            UseCookies = false
+            UseCookies = false,
+            UseProxy = !string.IsNullOrWhiteSpace(proxyUrl)
         };
         if (!string.IsNullOrWhiteSpace(proxyUrl))
         {
@@ -65,6 +66,7 @@ public static class CookieVerificationService
                       && !exBody.Contains("Sad Panda", StringComparison.OrdinalIgnoreCase)
                       && !ContainsLoginFailure(exBody);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch
         {
             // E-Hentai 已验证时，ExHentai 的单独网络失败不应抹掉前者结果。

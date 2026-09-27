@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
 using System.Windows.Media;
 using System.Windows.Threading;
 
@@ -46,6 +47,16 @@ public partial class MainWindow : Window
     private bool _syncingCookieInputs;
     private bool _isQueueRunning;
     private bool _isPreparingResume;
+    private CancellationTokenSource? _preparationCancellation;
+    private bool _isPreparingNodeTest;
+    private bool _isConnectingNodeTester;
+    private bool _jobHistoryWritable = true;
+    private ListCollectionView? _taskView;
+    private readonly SemaphoreSlim _controllerConnectionGate = new(1, 1);
+    private string? _nodeTestGalleryUrl;
+    private bool IsOperationBusy => _runningJob is not null || _isQueueRunning
+        || _isPreparingResume || _isNodeTesting || _isPreparingNodeTest || _isConnectingNodeTester
+        || _engineUpdateCancellation is not null;
     private bool _stopQueueRequested;
     private bool _composerExpandedWhileBusy;
     private string? _verifiedManualCookie;
@@ -63,9 +74,23 @@ public partial class MainWindow : Window
         App.ApplyUiScale(_settings.UiScalePercent);
         SettingsStore.CleanupStaleRunFiles();
         ApplySettings();
-        foreach (var job in JobStore.Load())
-            Jobs.Add(job);
-        JobsGrid.SelectedItem = Jobs.FirstOrDefault(job => job.State is "下载中" or "自动续传")
+        try
+        {
+            foreach (var job in JobStore.Load()) Jobs.Add(job);
+        }
+        catch (InvalidDataException ex)
+        {
+            _jobHistoryWritable = false;
+            MessageBox.Show(ex.Message + "本次运行不会覆盖原下载记录。", "记录读取失败");
+        }
+        _taskView = new ListCollectionView(Jobs);
+        _taskView.Filter = value => value is DownloadJob job
+            && (ShowCompletedTasksCheckBox.IsChecked == true || job.State != "已完成");
+        JobsGrid.ItemsSource = _taskView;
+        var version = typeof(App).Assembly.GetName().Version?.ToString(3) ?? "未知";
+        AppVersionText.Text = $"v{version} · 本地运行";
+        SettingsVersionText.Text = $"当前版本 {version}";
+        JobsGrid.SelectedItem = Jobs.FirstOrDefault(job => job.State != "已完成")
                                 ?? Jobs.FirstOrDefault();
         RefreshCurrentTaskCard();
         UpdateComposerVisibility(false);
@@ -77,11 +102,12 @@ public partial class MainWindow : Window
                 await RefreshAutoDetectedProxyAsync(showStatus: false);
             await RefreshEngineStatusAsync();
             await CheckApplicationUpdateAsync(showLatest: false);
-            if (File.Exists(_nodeRecoveryPath))
+            if (!IsOperationBusy && File.Exists(_nodeRecoveryPath))
                 await EnsureNodeTesterConnectedAsync(showError: false);
         };
         Closing += (_, _) =>
         {
+            _preparationCancellation?.Cancel();
             _downloadCancellation?.Cancel();
             _cookieVerificationCancellation?.Cancel();
             _browserImportCancellation?.Cancel();
@@ -175,7 +201,7 @@ public partial class MainWindow : Window
     private async void NodeNavButton_Click(object sender, RoutedEventArgs e)
     {
         ShowPage(2);
-        if (!_isNodeTesting)
+        if (!IsOperationBusy)
         {
             NodeTestStatusText.Text = "正在连接 Clash/Mihomo 控制接口…";
             await EnsureNodeTesterConnectedAsync(showError: false);
@@ -207,26 +233,27 @@ public partial class MainWindow : Window
             if (HistoryGrid.SelectedItem is not null)
                 HistoryGrid.ScrollIntoView(HistoryGrid.SelectedItem);
         }
-        var active = new SolidColorBrush(Color.FromRgb(42, 59, 88));
-        var inactive = new SolidColorBrush(Color.FromRgb(175, 188, 208));
+        var active = new SolidColorBrush(Color.FromRgb(232, 240, 255));
+        var inactive = new SolidColorBrush(Color.FromRgb(71, 84, 103));
+        var activeText = new SolidColorBrush(Color.FromRgb(23, 92, 211));
         DownloadNavButton.Background = index == 0 ? active : Brushes.Transparent;
         HistoryNavButton.Background = index == 1 ? active : Brushes.Transparent;
         NodeNavButton.Background = index == 2 ? active : Brushes.Transparent;
         SettingsNavButton.Background = index == 3 ? active : Brushes.Transparent;
-        DownloadNavButton.Foreground = index == 0 ? Brushes.White : inactive;
-        HistoryNavButton.Foreground = index == 1 ? Brushes.White : inactive;
-        NodeNavButton.Foreground = index == 2 ? Brushes.White : inactive;
-        SettingsNavButton.Foreground = index == 3 ? Brushes.White : inactive;
-        DownloadNavText.Foreground = DownloadNavGlyph.Foreground = index == 0 ? Brushes.White : inactive;
-        HistoryNavText.Foreground = HistoryNavGlyph.Foreground = index == 1 ? Brushes.White : inactive;
-        NodeNavText.Foreground = NodeNavGlyph.Foreground = index == 2 ? Brushes.White : inactive;
-        SettingsNavText.Foreground = SettingsNavGlyph.Foreground = index == 3 ? Brushes.White : inactive;
+        DownloadNavButton.Foreground = index == 0 ? activeText : inactive;
+        HistoryNavButton.Foreground = index == 1 ? activeText : inactive;
+        NodeNavButton.Foreground = index == 2 ? activeText : inactive;
+        SettingsNavButton.Foreground = index == 3 ? activeText : inactive;
+        DownloadNavText.Foreground = DownloadNavGlyph.Foreground = index == 0 ? activeText : inactive;
+        HistoryNavText.Foreground = HistoryNavGlyph.Foreground = index == 1 ? activeText : inactive;
+        NodeNavText.Foreground = NodeNavGlyph.Foreground = index == 2 ? activeText : inactive;
+        SettingsNavText.Foreground = SettingsNavGlyph.Foreground = index == 3 ? activeText : inactive;
         (PageTitleText.Text, PageSubtitleText.Text) = index switch
         {
             1 => ("下载记录", "查看任务结果和保存位置"),
             2 => ("连接诊断", "检查代理、节点和画廊连接是否正常"),
             3 => ("设置", "管理下载偏好、连接方式与登录信息"),
-            _ => ("下载", "粘贴画廊链接，就可以开始")
+            _ => ("下载中心", "继续未完成的任务，或添加新的画廊")
         };
     }
 
@@ -238,7 +265,7 @@ public partial class MainWindow : Window
         {
             "off" => "固定当前节点",
             "all" => "自动遍历节点",
-            _ => "自动最佳节点"
+            _ => NodeResults.Any(result => result.SuccessfulSamples > 0) ? "失败后按测速换节点" : "当前节点（尚未测速）"
         };
         var metadata = MetadataCheckBox.IsChecked == true ? "保存画廊信息" : "不保存元数据";
         var package = CbzCheckBox.IsChecked == true ? "CBZ" : "文件夹";
@@ -247,11 +274,14 @@ public partial class MainWindow : Window
 
     private void UpdateDownloadStats()
     {
-        if (DownloadStatsText is null) return;
-        var active = Jobs.Count(job => job.State is "下载中" or "自动续传");
-        var queued = Jobs.Count(job => job.State == "排队中");
+        if (DownloadStatsText is null || AppStatusText is null || EmptyQueueText is null) return;
+        var active = Jobs.Count(job => job.IsActive);
         var completed = Jobs.Count(job => job.State == "已完成");
-        DownloadStatsText.Text = $"下载中 {active} · 等待 {queued} · 已完成 {completed}";
+        var attention = Jobs.Count(job => job.NeedsAttention);
+        DownloadStatsText.Text = $"进行中 {active} · 待处理 {Jobs.Count - completed - active} · 已完成 {completed}";
+        AppStatusText.Text = attention > 0 ? $"{attention} 个任务需处理" : active > 0 ? "正在下载" : "等待操作";
+        EmptyQueueText.Visibility = Jobs.Any(job => ShowCompletedTasksCheckBox.IsChecked == true
+            || job.State != "已完成") ? Visibility.Collapsed : Visibility.Visible;
     }
 
     private async Task RefreshEngineStatusAsync()
@@ -269,9 +299,10 @@ public partial class MainWindow : Window
             else
             {
                 EngineDot.Fill = (Brush)FindResource("SuccessBrush");
-                EngineStatusText.Text = $"内核 {version}";
+                EngineStatusText.Text = "下载内核已就绪";
+                EngineStatusText.ToolTip = $"gallery-dl {version}";
                 InstallEngineButton.Content = "检查更新";
-                FooterStatusText.Text = "准备就绪。推荐粘贴网站 Cookie；Chrome 可以保持开启。";
+                if (!IsOperationBusy) FooterStatusText.Text = "选择待处理任务继续，或新建下载。";
             }
         }
         catch (Exception ex)
@@ -284,11 +315,12 @@ public partial class MainWindow : Window
 
     private async void InstallEngineButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_runningJob is not null || _isNodeTesting) return;
+        if (IsOperationBusy) return;
 
         _engineUpdateCancellation?.Cancel();
         _engineUpdateCancellation?.Dispose();
         _engineUpdateCancellation = new CancellationTokenSource();
+        SetRunningUi(false);
         InstallEngineButton.IsEnabled = false;
         EngineStatusText.Text = "正在检查…";
         EngineDot.Fill = (Brush)FindResource("WarningBrush");
@@ -361,10 +393,7 @@ public partial class MainWindow : Window
         {
             _engineUpdateCancellation?.Dispose();
             _engineUpdateCancellation = null;
-            InstallEngineButton.IsEnabled = true;
-            ActivityProgressBar.IsIndeterminate = false;
-            ActivityProgressBar.Value = 0;
-            ActivityProgressBar.Visibility = Visibility.Collapsed;
+            SetRunningUi(false);
         }
     }
 
@@ -470,48 +499,72 @@ public partial class MainWindow : Window
 
     private async void StartButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_runningJob is not null || _isQueueRunning) return;
-        await RefreshAutoDetectedProxyAsync(showStatus: false);
-        var urls = GalleryUrlValidator.ParseMany(UrlTextBox.Text, out var message);
-        if (urls.Count == 0)
+        if (IsOperationBusy) return;
+        BeginDownloadPreparation("正在检查连接，准备新任务…");
+        try
         {
-            MessageBox.Show(message, "还差一点", MessageBoxButton.OK, MessageBoxImage.Information);
-            return;
-        }
-        if (!TryValidateInputs(urls[0], out message))
-        {
-            MessageBox.Show(message, "还差一点", MessageBoxButton.OK, MessageBoxImage.Information);
-            return;
-        }
-        foreach (var url in urls.Skip(1))
-        {
-            if (TryValidateInputs(url, out message)) continue;
-            MessageBox.Show(message, "还差一点", MessageBoxButton.OK, MessageBoxImage.Information);
-            return;
-        }
-        if (!ConfirmBrowserCookieAccess())
-            return;
-
-        var queued = new List<DownloadJob>();
-        var newJobInsertIndex = 0;
-        foreach (var url in urls)
-        {
-            var job = DownloadTaskLogic.FindReusable(Jobs, url) ?? CreateJob(url);
-            if (!Jobs.Contains(job))
-                Jobs.Insert(newJobInsertIndex++, job);
-            else
+            await Dispatcher.Yield(DispatcherPriority.Background);
+            await RefreshAutoDetectedProxyAsync(showStatus: false, _preparationCancellation!.Token);
+            var urls = GalleryUrlValidator.ParseMany(UrlTextBox.Text, out var message);
+            if (urls.Count == 0)
             {
-                RefreshRetryOptions(job);
-                job.OutputDirectory = OutputPathTextBox.Text.Trim();
+                MessageBox.Show(message, "还差一点", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
             }
-            job.State = "排队中";
-            job.Details = "已加入下载队列。";
-            queued.Add(job);
+            if (!TryValidateInputs(urls[0], out message))
+            {
+                MessageBox.Show(message, "还差一点", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            foreach (var url in urls.Skip(1))
+            {
+                if (TryValidateInputs(url, out message)) continue;
+                MessageBox.Show(message, "还差一点", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            if (!ConfirmBrowserCookieAccess())
+                return;
+
+            var queued = new List<DownloadJob>();
+            var newJobInsertIndex = 0;
+            foreach (var url in urls)
+            {
+                var job = DownloadTaskLogic.FindReusable(Jobs, url) ?? CreateJob(url);
+                if (!Jobs.Contains(job))
+                    Jobs.Insert(newJobInsertIndex++, job);
+                else
+                {
+                    RefreshRetryOptions(job);
+                    job.OutputDirectory = OutputPathTextBox.Text.Trim();
+                }
+                job.State = "排队中";
+                job.Details = "已加入下载队列。";
+                queued.Add(job);
+            }
+            SaveJobs();
+            UrlTextBox.Clear();
+            JobsGrid.SelectedItem = queued[0];
+            await RunQueuedJobsAsync(queued);
         }
-        SaveJobs();
-        UrlTextBox.Clear();
-        JobsGrid.SelectedItem = queued[0];
-        await RunQueuedJobsAsync(queued);
+        catch (OperationCanceledException) { FooterStatusText.Text = "已取消准备。"; }
+        catch (Exception ex) { FooterStatusText.Text = FriendlyError(ex.Message); }
+        finally { EndDownloadPreparation(); }
+    }
+
+    private void BeginDownloadPreparation(string message)
+    {
+        _isPreparingResume = true;
+        _preparationCancellation = new CancellationTokenSource();
+        FooterStatusText.Text = message;
+        SetRunningUi(false);
+    }
+
+    private void EndDownloadPreparation()
+    {
+        _isPreparingResume = false;
+        _preparationCancellation?.Dispose();
+        _preparationCancellation = null;
+        SetRunningUi(_runningJob is not null);
     }
 
     private async Task RunQueuedJobsAsync(IEnumerable<DownloadJob>? requestedJobs = null)
@@ -535,26 +588,32 @@ public partial class MainWindow : Window
         }
         finally
         {
+            if (_stopQueueRequested)
+                foreach (var pending in queue.Where(job => job.State == "排队中"))
+                {
+                    pending.State = "已停止";
+                    pending.Details = "队列已暂停，点击继续下载可恢复。";
+                }
             _isQueueRunning = false;
+            SaveJobs();
             SetRunningUi(false);
         }
     }
 
     private async void RetryButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_runningJob is not null || _isPreparingResume
+        if (IsOperationBusy
             || JobsGrid.SelectedItem is not DownloadJob selected) return;
-        _isPreparingResume = true;
-        RetryButton.IsEnabled = false;
-        ActivityProgressBar.Visibility = Visibility.Visible;
-        ActivityProgressBar.IsIndeterminate = true;
+        var previousState = selected.State;
+        BeginDownloadPreparation("正在准备继续下载…");
+        selected.State = "准备中";
         selected.Details = "已收到继续请求，正在检查连接并定位本地断点…";
         FooterStatusText.Text = selected.Details;
         RefreshSelectedDetails();
         try
         {
             await Dispatcher.Yield(DispatcherPriority.Background);
-            await RefreshAutoDetectedProxyAsync(showStatus: false);
+            await RefreshAutoDetectedProxyAsync(showStatus: false, _preparationCancellation!.Token);
             if (!TryValidateInputs(selected.Url, out var message, selected.OutputDirectory))
             {
                 MessageBox.Show(message, "无法继续", MessageBoxButton.OK, MessageBoxImage.Information);
@@ -564,10 +623,13 @@ public partial class MainWindow : Window
             RefreshRetryOptions(selected);
             await RunJobAsync(selected);
         }
+        catch (OperationCanceledException) { selected.Details = "已取消准备，已有图片已保留。"; }
+        catch (Exception ex) { selected.Details = FriendlyError(ex.Message); }
         finally
         {
-            _isPreparingResume = false;
-            if (_runningJob is null) SetRunningUi(false);
+            if (selected.State == "准备中") selected.State = previousState;
+            EndDownloadPreparation();
+            SaveJobs();
         }
     }
 
@@ -642,6 +704,7 @@ public partial class MainWindow : Window
             job.BlockedEngineVersion = null;
         }
 
+        _preparationCancellation?.Token.ThrowIfCancellationRequested();
         SaveSettings();
         job.BeginAttempt();
         _runningJob = job;
@@ -722,6 +785,7 @@ public partial class MainWindow : Window
             {
                 var exitCode = await _service.RunAsync(
                     engine, job, _downloadCancellation.Token, compatibilityResume);
+                await Dispatcher.Yield(DispatcherPriority.Background);
                 if (_downloadCancellation.IsCancellationRequested || exitCode == -1)
                 {
                     job.FinishedAt = DateTime.Now;
@@ -730,7 +794,7 @@ public partial class MainWindow : Window
                     FooterStatusText.Text = "任务已停止，可随时选中后重新尝试。";
                     break;
                 }
-                if (exitCode == 0)
+                if (exitCode == 0 && job.FailedFiles == 0)
                 {
                     job.FinishedAt = DateTime.Now;
                     job.State = "已完成";
@@ -800,6 +864,8 @@ public partial class MainWindow : Window
         }
         finally
         {
+            job.SpeedMbPerSecond = 0;
+            job.EstimatedRemaining = "—";
             _service.Dispose();
             _service = null;
             _downloadCancellation.Dispose();
@@ -814,6 +880,7 @@ public partial class MainWindow : Window
 
     private void StopButton_Click(object sender, RoutedEventArgs e)
     {
+        _preparationCancellation?.Cancel();
         StopButton.IsEnabled = false;
         FooterStatusText.Text = "正在安全停止；已经下完的文件不会删除。";
         _downloadCancellation?.Cancel();
@@ -823,8 +890,7 @@ public partial class MainWindow : Window
 
     private async void ContinueAllButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_runningJob is not null || _isQueueRunning || _isNodeTesting
-            || _isPreparingResume) return;
+        if (IsOperationBusy) return;
         var firstPending = Jobs.FirstOrDefault(job => job.State != "已完成");
         if (firstPending is null)
         {
@@ -832,14 +898,11 @@ public partial class MainWindow : Window
                 MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
-        _isPreparingResume = true;
-        ActivityProgressBar.Visibility = Visibility.Visible;
-        ActivityProgressBar.IsIndeterminate = true;
-        FooterStatusText.Text = "已收到继续全部请求，正在检查连接和待续任务…";
+        BeginDownloadPreparation("正在检查连接和待续任务…");
         try
         {
             await Dispatcher.Yield(DispatcherPriority.Background);
-            await RefreshAutoDetectedProxyAsync(showStatus: false);
+            await RefreshAutoDetectedProxyAsync(showStatus: false, _preparationCancellation!.Token);
             if (!TryValidateInputs(firstPending.Url, out var message, firstPending.OutputDirectory))
             {
                 MessageBox.Show(message, "无法继续队列", MessageBoxButton.OK, MessageBoxImage.Information);
@@ -863,16 +926,18 @@ public partial class MainWindow : Window
             SaveJobs();
             await RunQueuedJobsAsync(queue);
         }
+        catch (OperationCanceledException) { FooterStatusText.Text = "已取消准备。"; }
+        catch (Exception ex) { FooterStatusText.Text = FriendlyError(ex.Message); }
         finally
         {
-            _isPreparingResume = false;
-            if (_runningJob is null) SetRunningUi(false);
+            EndDownloadPreparation();
         }
     }
 
     private void RemoveSelectedJobButton_Click(object sender, RoutedEventArgs e)
     {
         JobMorePopup.IsOpen = false;
+        if (IsOperationBusy) return;
         if (JobsGrid.SelectedItem is not DownloadJob selected
             || ReferenceEquals(selected, _runningJob)) return;
         Jobs.Remove(selected);
@@ -882,6 +947,7 @@ public partial class MainWindow : Window
     private void ClearFinishedJobsButton_Click(object sender, RoutedEventArgs e)
     {
         JobMorePopup.IsOpen = false;
+        if (IsOperationBusy) return;
         foreach (var job in Jobs.Where(job => job.State == "已完成").ToList())
             Jobs.Remove(job);
         SaveJobs();
@@ -889,6 +955,7 @@ public partial class MainWindow : Window
 
     private void MoveSelectedJob(int offset)
     {
+        if (IsOperationBusy) return;
         if (JobsGrid.SelectedItem is not DownloadJob selected
             || ReferenceEquals(selected, _runningJob)) return;
         var oldIndex = Jobs.IndexOf(selected);
@@ -929,7 +996,7 @@ public partial class MainWindow : Window
 
     private void OpenFolderButton_Click(object sender, RoutedEventArgs e)
     {
-        var path = JobsGrid.SelectedItem is DownloadJob selected
+        var path = CurrentTaskCard.DataContext is DownloadJob selected
             ? selected.OutputDirectory
             : OutputPathTextBox.Text.Trim();
         OpenDirectory(path);
@@ -961,7 +1028,7 @@ public partial class MainWindow : Window
 
     private void JobsGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        RetryButton.IsEnabled = _runningJob is null && JobsGrid.SelectedItem is DownloadJob;
+        RetryButton.IsEnabled = !IsOperationBusy && JobsGrid.SelectedItem is DownloadJob;
         RefreshCurrentTaskCard();
         RefreshSelectedDetails();
     }
@@ -976,17 +1043,29 @@ public partial class MainWindow : Window
     private void UpdateComposerVisibility(bool busy)
     {
         if (NewTaskCard is null || AddNewTaskCollapsedButton is null) return;
+        CloseNewTaskButton.Visibility = Jobs.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         var collapse = (busy || Jobs.Count > 0) && !_composerExpandedWhileBusy;
         NewTaskCard.Visibility = collapse ? Visibility.Collapsed : Visibility.Visible;
         AddNewTaskCollapsedButton.Visibility = collapse ? Visibility.Visible : Visibility.Collapsed;
+        RefreshCurrentTaskCard();
+    }
+
+    private void CloseNewTaskButton_Click(object sender, RoutedEventArgs e)
+    {
+        _composerExpandedWhileBusy = false;
+        UpdateComposerVisibility(IsOperationBusy);
     }
 
     private void RefreshCurrentTaskCard()
     {
         if (CurrentTaskCard is null) return;
-        var job = _runningJob ?? JobsGrid?.SelectedItem as DownloadJob ?? Jobs.FirstOrDefault();
+        var job = _runningJob ?? JobsGrid?.SelectedItem as DownloadJob
+            ?? Jobs.FirstOrDefault(item => ShowCompletedTasksCheckBox.IsChecked == true
+                || item.State != "已完成");
         CurrentTaskCard.DataContext = job;
-        CurrentTaskCard.Visibility = job is null ? Visibility.Collapsed : Visibility.Visible;
+        CurrentTaskCard.Visibility = job is null || NewTaskCard.Visibility == Visibility.Visible
+            ? Visibility.Collapsed : Visibility.Visible;
+        CurrentTaskHeadingText.Text = _runningJob is not null ? "正在进行" : "选中任务";
         if (CurrentTaskNodeText is not null)
             CurrentTaskNodeText.Text = GetCurrentNodeName();
     }
@@ -998,7 +1077,7 @@ public partial class MainWindow : Window
             && _clashState.Proxies.TryGetValue(_resultGroup, out var group)
             && !string.IsNullOrWhiteSpace(group.Now))
             return group.Now;
-        return "自动最佳节点";
+        return UseProxyCheckBox.IsChecked == true ? "Clash 当前节点" : "直接连接";
     }
 
     private void HistoryOpenFolderButton_Click(object sender, RoutedEventArgs e)
@@ -1012,7 +1091,7 @@ public partial class MainWindow : Window
 
     private void RefreshSelectedDetails()
     {
-        if (JobsGrid.SelectedItem is DownloadJob selected)
+        if (CurrentTaskCard.DataContext is DownloadJob selected)
             DetailsTextBox.Text = selected.Details;
     }
 
@@ -1029,13 +1108,26 @@ public partial class MainWindow : Window
 
     private void SetRunningUi(bool running)
     {
-        var busy = running || _isNodeTesting || _isQueueRunning;
+        var busy = running || IsOperationBusy;
         if (busy) _composerExpandedWhileBusy = false;
         UpdateComposerVisibility(busy);
         StartButton.IsEnabled = !busy;
-        StopButton.IsEnabled = running;
+        StopButton.IsEnabled = running || _isPreparingResume;
+        StopButton.Visibility = running || _isPreparingResume ? Visibility.Visible : Visibility.Collapsed;
+        RetryButton.Visibility = running || _isPreparingResume ? Visibility.Collapsed : Visibility.Visible;
+        StopButton.Content = running ? "暂停下载" : "取消准备";
         RetryButton.IsEnabled = !busy && JobsGrid.SelectedItem is DownloadJob;
         InstallEngineButton.IsEnabled = !busy;
+        SettingsEngineUpdateButton.IsEnabled = !busy;
+        ContinueAllButton.IsEnabled = !busy && Jobs.Any(job => job.State != "已完成");
+        JobMoreButton.IsEnabled = !busy;
+        SettingsTabControl.IsEnabled = !busy;
+        AddNewTaskCollapsedButton.IsEnabled = !busy;
+        QuickNodeTestButton.IsEnabled = !busy && NodeGroupComboBox.SelectedItem is ProxyInfo;
+        PreciseNodeTestButton.IsEnabled = !busy && NodeResults.Any(result => result.SuccessfulSamples > 0);
+        UseTestedNodeButton.IsEnabled = !busy && NodeResultsGrid.SelectedItem is NodeProbeResult { SuccessfulSamples: > 0 };
+        NodeGroupComboBox.IsEnabled = !busy;
+        NodeTestModeComboBox.IsEnabled = !busy;
         LoginModeComboBox.IsEnabled = !busy;
         ManualCookiePanel.IsEnabled = !busy
                                       && GetSelectedTag(LoginModeComboBox, "manual") != "none";
@@ -1044,8 +1136,25 @@ public partial class MainWindow : Window
         OpenNodeTestButton.IsEnabled = !busy;
         AutoFailoverModeComboBox.IsEnabled = !busy;
         ActivityProgressBar.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
-        ActivityProgressBar.IsIndeterminate = running;
+        ActivityProgressBar.IsIndeterminate = running || _isPreparingResume || _isPreparingNodeTest;
         RefreshCurrentTaskCard();
+    }
+
+    private void ShowCompletedTasksCheckBox_Changed(object sender, RoutedEventArgs e)
+    {
+        _taskView?.Refresh();
+        UpdateDownloadStats();
+        if (JobsGrid.SelectedItem is null) JobsGrid.SelectedItem = _taskView?.Cast<DownloadJob>().FirstOrDefault();
+        RefreshCurrentTaskCard();
+    }
+
+    private void HistoryContinueButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (IsOperationBusy || HistoryGrid.SelectedItem is not DownloadJob selected) return;
+        ShowCompletedTasksCheckBox.IsChecked = selected.State == "已完成";
+        ShowPage(0);
+        JobsGrid.SelectedItem = selected;
+        RetryButton_Click(sender, e);
     }
 
     private bool TryValidateInputs(
@@ -1123,7 +1232,10 @@ public partial class MainWindow : Window
     private void SaveJobs()
     {
         UpdateDownloadStats();
+        _taskView?.Refresh();
         UpdateComposerVisibility(_runningJob is not null || _isNodeTesting || _isQueueRunning);
+        if (JobsGrid.SelectedItem is null) JobsGrid.SelectedItem = _taskView?.Cast<DownloadJob>().FirstOrDefault();
+        if (!_jobHistoryWritable) return;
         try { JobStore.Save(Jobs); }
         catch { }
     }
@@ -1526,86 +1638,93 @@ public partial class MainWindow : Window
         bool showStatus,
         CancellationToken cancellationToken = default)
     {
-        if (UseProxyCheckBox.IsChecked != true)
+        await _controllerConnectionGate.WaitAsync(cancellationToken);
+        try
         {
-            ProxyDetectionStatusText.Text = "未使用代理";
-            return false;
-        }
-        if (AutoDetectProxyCheckBox.IsChecked != true)
-        {
-            ProxyDetectionStatusText.Text = "使用手动地址";
-            return false;
-        }
+            if (UseProxyCheckBox.IsChecked != true)
+            {
+                ProxyDetectionStatusText.Text = "未使用代理";
+                return false;
+            }
+            if (AutoDetectProxyCheckBox.IsChecked != true)
+            {
+                ProxyDetectionStatusText.Text = "使用手动地址";
+                return false;
+            }
 
-        if (_mihomoClient is not null)
-        {
-            try
+            if (_mihomoClient is not null)
             {
-                var state = await _mihomoClient.GetStateAsync(cancellationToken);
-                _clashState = state;
-                ApplyDetectedProxyEndpoint(state, showStatus);
-                return !string.IsNullOrWhiteSpace(state.ProxyUrl);
+                try
+                {
+                    using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    timeout.CancelAfter(TimeSpan.FromSeconds(3));
+                    var state = await _mihomoClient.GetStateAsync(timeout.Token);
+                    _clashState = state;
+                    ApplyDetectedProxyEndpoint(state, showStatus);
+                    return !string.IsNullOrWhiteSpace(state.ProxyUrl);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch
+                {
+                    _mihomoClient.Dispose();
+                    _mihomoClient = null;
+                    _clashState = null;
+                }
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch
-            {
-                _mihomoClient.Dispose();
-                _mihomoClient = null;
-                _clashState = null;
-            }
-        }
 
-        Exception? lastError = null;
-        foreach (var endpoint in new[]
-                 {
+            Exception? lastError = null;
+            foreach (var endpoint in new[]
+                     {
                      "pipe://verge-mihomo",
                      "pipe://mihomo",
                      "http://127.0.0.1:9097",
                      "http://127.0.0.1:9090",
                      "http://127.0.0.1:9093"
                  })
-        {
-            MihomoClient? candidate = null;
-            try
             {
-                candidate = new MihomoClient(endpoint);
-                using var timeout =
-                    CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                timeout.CancelAfter(TimeSpan.FromSeconds(3));
-                var state = await candidate.GetStateAsync(timeout.Token);
-                _mihomoClient = candidate;
-                candidate = null;
-                _clashState = state;
-                await TryRecoverInterruptedNodeTestAsync();
-                _clashState = await _mihomoClient.GetStateAsync(cancellationToken);
-                PopulateNodeGroups();
-                ApplyDetectedProxyEndpoint(_clashState, showStatus);
-                return !string.IsNullOrWhiteSpace(_clashState.ProxyUrl);
+                MihomoClient? candidate = null;
+                try
+                {
+                    candidate = new MihomoClient(endpoint);
+                    using var timeout =
+                        CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    timeout.CancelAfter(TimeSpan.FromSeconds(3));
+                    var state = await candidate.GetStateAsync(timeout.Token);
+                    _mihomoClient = candidate;
+                    candidate = null;
+                    _clashState = state;
+                    await TryRecoverInterruptedNodeTestAsync();
+                    _clashState = await _mihomoClient.GetStateAsync(cancellationToken);
+                    PopulateNodeGroups();
+                    ApplyDetectedProxyEndpoint(_clashState, showStatus);
+                    return !string.IsNullOrWhiteSpace(_clashState.ProxyUrl);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    candidate?.Dispose();
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    candidate?.Dispose();
+                    lastError = ex;
+                }
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                candidate?.Dispose();
-                throw;
-            }
-            catch (Exception ex)
-            {
-                candidate?.Dispose();
-                lastError = ex;
-            }
-        }
 
-        ProxyDetectionStatusText.Text =
-            $"自动识别失败，沿用 {NormalizeProxy(ProxyTextBox.Text)}";
-        if (showStatus)
-        {
-            FooterStatusText.Text =
-                "未能自动读取 Clash 端口，已继续使用输入框中的代理地址。"
-                + (lastError is null ? "" : $"（{FriendlyError(lastError.Message)}）");
+            ProxyDetectionStatusText.Text =
+                $"自动识别失败，沿用 {NormalizeProxy(ProxyTextBox.Text)}";
+            if (showStatus)
+            {
+                FooterStatusText.Text =
+                    "未能自动读取 Clash 端口，已继续使用输入框中的代理地址。"
+                    + (lastError is null ? "" : $"（{FriendlyError(lastError.Message)}）");
+            }
+            return false;
         }
-        return false;
+        finally { _controllerConnectionGate.Release(); }
     }
 
     private void ApplyDetectedProxyEndpoint(ClashState state, bool showStatus)
@@ -1641,7 +1760,7 @@ public partial class MainWindow : Window
 
     private async void OpenNodeTestButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_runningJob is not null || _isNodeTesting) return;
+        if (IsOperationBusy) return;
         ShowPage(2);
         NodeTestStatusText.Text = "正在连接 Clash/Mihomo 控制接口…";
         await EnsureNodeTesterConnectedAsync(showError: true);
@@ -1663,8 +1782,14 @@ public partial class MainWindow : Window
 
     private async Task<bool> EnsureNodeTesterConnectedAsync(bool showError)
     {
-        var endpoints = new[]
+        if (_isConnectingNodeTester) return false;
+        _isConnectingNodeTester = true;
+        SetRunningUi(false);
+        await _controllerConnectionGate.WaitAsync();
+        try
         {
+            var endpoints = new[]
+            {
             _mihomoClient?.Endpoint,
             "pipe://verge-mihomo",
             "pipe://mihomo",
@@ -1672,54 +1797,67 @@ public partial class MainWindow : Window
             "http://127.0.0.1:9090",
             "http://127.0.0.1:9093"
         }.Where(value => !string.IsNullOrWhiteSpace(value))
-         .Distinct(StringComparer.OrdinalIgnoreCase)
-         .Cast<string>()
-         .ToArray();
+             .Distinct(StringComparer.OrdinalIgnoreCase)
+             .Cast<string>()
+             .ToArray();
 
-        Exception? lastError = null;
-        foreach (var endpoint in endpoints)
-        {
-            MihomoClient? candidate = null;
-            try
+            Exception? lastError = null;
+            foreach (var endpoint in endpoints)
             {
-                candidate = new MihomoClient(endpoint);
-                var state = await candidate.GetStateAsync();
-                _mihomoClient?.Dispose();
-                _mihomoClient = candidate;
-                candidate = null;
-                _clashState = state;
-                await TryRecoverInterruptedNodeTestAsync();
-                _clashState = await _mihomoClient.GetStateAsync();
-                ApplyDetectedProxyEndpoint(_clashState, showStatus: false);
-                PopulateNodeGroups();
-                NodeTestStatusText.Text =
-                    $"已连接 Clash · {_clashState.Mode} 模式。请选择实际控制画廊流量的策略组。";
-                return true;
+                MihomoClient? candidate = null;
+                try
+                {
+                    candidate = new MihomoClient(endpoint);
+                    using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+                    var state = await candidate.GetStateAsync(deadline.Token);
+                    _mihomoClient?.Dispose();
+                    _mihomoClient = candidate;
+                    candidate = null;
+                    _clashState = state;
+                    await TryRecoverInterruptedNodeTestAsync();
+                    if (File.Exists(_nodeRecoveryPath))
+                    {
+                        NodeTestStatusText.Text = "上次测速的节点尚未恢复，请先在 Clash 检查节点和模式，再重新连接。";
+                        return false;
+                    }
+                    _clashState = await _mihomoClient.GetStateAsync();
+                    ApplyDetectedProxyEndpoint(_clashState, showStatus: false);
+                    PopulateNodeGroups();
+                    NodeTestStatusText.Text =
+                        $"已连接 Clash · {_clashState.Mode} 模式。请选择实际控制画廊流量的策略组。";
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    candidate?.Dispose();
+                    lastError = ex;
+                }
             }
-            catch (Exception ex)
-            {
-                candidate?.Dispose();
-                lastError = ex;
-            }
-        }
 
-        _mihomoClient?.Dispose();
-        _mihomoClient = null;
-        _clashState = null;
-        NodeGroupComboBox.ItemsSource = null;
-        QuickNodeTestButton.IsEnabled = false;
-        NodeCandidateText.Text = "没有连接到 Clash";
-        NodeTestStatusText.Text =
-            "未找到 Clash/Mihomo 控制接口。请确认 Clash Verge 正在运行。";
-        if (showError)
-        {
-            MessageBox.Show(
-                lastError?.Message ?? NodeTestStatusText.Text,
-                "无法连接 Clash",
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
+            _mihomoClient?.Dispose();
+            _mihomoClient = null;
+            _clashState = null;
+            NodeGroupComboBox.ItemsSource = null;
+            QuickNodeTestButton.IsEnabled = false;
+            NodeCandidateText.Text = "没有连接到 Clash";
+            NodeTestStatusText.Text =
+                "未找到 Clash/Mihomo 控制接口。请确认 Clash Verge 正在运行。";
+            if (showError)
+            {
+                MessageBox.Show(
+                    lastError?.Message ?? NodeTestStatusText.Text,
+                    "无法连接 Clash",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+            }
+            return false;
         }
-        return false;
+        finally
+        {
+            _controllerConnectionGate.Release();
+            _isConnectingNodeTester = false;
+            SetRunningUi(false);
+        }
     }
 
     private void PopulateNodeGroups()
@@ -1806,225 +1944,239 @@ public partial class MainWindow : Window
             + (ignored > 0 ? $"；忽略 {ignored} 个策略组/特殊项" : "")
             + "；先用 Clash 剔除断线节点，再进行真实图片下载测速";
         QuickNodeTestButton.IsEnabled =
-            !_isNodeTesting && _runningJob is null && candidates.Count > 0;
+            !IsOperationBusy && candidates.Count > 0;
     }
 
     private async void QuickNodeTestButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_runningJob is not null || _isNodeTesting) return;
-        await RefreshAutoDetectedProxyAsync(showStatus: false);
-        var url = UrlTextBox.Text.Trim();
-        if (!TryValidateInputs(url, out var message))
-        {
-            MessageBox.Show(message, "还差一点", MessageBoxButton.OK, MessageBoxImage.Information);
-            return;
-        }
-        if (UseProxyCheckBox.IsChecked != true)
-        {
-            MessageBox.Show(
-                "真实节点测试必须勾选“使用 Clash 代理”。",
-                "无法开始",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
-            return;
-        }
-        if (!ConfirmBrowserCookieAccess()) return;
-        if (!await EnsureNodeTesterConnectedAsync(showError: true)
-            || NodeGroupComboBox.SelectedItem is not ProxyInfo group)
-            return;
-
-        var nodes = GetNodeCandidates(group);
-        if (nodes.Count == 0) return;
-        var testAllReachable =
-            GetSelectedTag(NodeTestModeComboBox, "smart") == "all";
-        if (testAllReachable && nodes.Count >= 40)
-        {
-            var answer = MessageBox.Show(
-                $"将先用 Clash 并发剔除断线节点，再对所有可联网节点进行真实图片下载测速。"
-                + $"\n当前策略组共有 {nodes.Count} 个节点，完整模式可能耗时较长。\n\n"
-                + "测试期间会保存并最终恢复当前节点。是否继续？",
-                "确认完整检测",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Question);
-            if (answer != MessageBoxResult.Yes) return;
-        }
-
-        var engine = _engineManager.FindEngine();
-        if (engine is null)
-        {
-            MessageBox.Show(
-                "缺少 gallery-dl 下载内核，请先安装内核。",
-                "无法开始",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
-            return;
-        }
-
-        NodeResults.Clear();
-        _gallerySamples = null;
-        _gallerySampleRefresh = null;
-        foreach (var node in nodes)
-        {
-            NodeResults.Add(new NodeProbeResult
-            {
-                Name = node.Name,
-                Type = node.Type
-            });
-        }
-        _resultGroup = group.Name;
-
-        IReadOnlyList<NodeProbeResult> realTestCandidates = [];
-        var clashReachableCount = 0;
-        var screeningCompleted = false;
-        var options = CreateJob(url).Options;
+        if (IsOperationBusy) return;
+        _isPreparingNodeTest = true;
+        SetRunningUi(false);
         try
         {
-            _isNodeTesting = true;
-            _nodeTestCancellation = new CancellationTokenSource();
-            NodeTestStatusText.Text =
-                $"第一关：正在要求 Clash 对 {nodes.Count} 个节点发起本轮检测，不读取历史延迟…";
-            SetRunningUi(false);
-            SetNodeTestingUi(true);
-            ActivityProgressBar.IsIndeterminate = true;
-
-            var clashDelays = await _mihomoClient!.RefreshAndMeasureGroupDelaysAsync(
-                group.Name,
-                nodes.Select(node => node.Name).ToArray(),
-                new Uri("https://www.gstatic.com/generate_204"),
-                timeoutMilliseconds: 3000,
-                expectedStatus: "200-299",
-                _nodeTestCancellation.Token);
-            NodeTestStatusText.Text =
-                "Clash 本轮主动检测已完成，正在按最新结果筛选节点…";
-            foreach (var result in NodeResults)
+            await RefreshAutoDetectedProxyAsync(showStatus: false);
+            var url = string.IsNullOrWhiteSpace(UrlTextBox.Text)
+                ? (JobsGrid.SelectedItem as DownloadJob)?.Url ?? Jobs.FirstOrDefault()?.Url ?? ""
+                : GalleryUrlValidator.ParseMany(UrlTextBox.Text, out _).FirstOrDefault() ?? UrlTextBox.Text.Trim();
+            _nodeTestGalleryUrl = url;
+            if (!TryValidateInputs(url, out var message))
             {
-                result.ClashScreened = true;
-                result.ClashDelayMs =
-                    clashDelays.TryGetValue(result.Name, out var delay) ? delay : 0;
-                if (result.ClashDelayMs <= 0)
-                {
-                    result.Rating = "已淘汰";
-                    result.Status = "Clash 检测 Error";
-                    result.Details =
-                        "第一关无法通过 Clash 的短连接测试，不再进行耗时的真实图片下载。";
-                }
+                MessageBox.Show(message, "还差一点", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
             }
-            clashReachableCount = NodeResults.Count(result => result.ClashDelayMs > 0);
-            SortNodeResults();
-            if (clashReachableCount == 0)
-                throw new InvalidOperationException(
-                    "Clash 快速检测没有找到可连接节点。请确认所选策略组正确，或稍后重试。");
+            if (UseProxyCheckBox.IsChecked != true)
+            {
+                MessageBox.Show(
+                    "真实节点测试必须勾选“使用 Clash 代理”。",
+                    "无法开始",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                return;
+            }
+            if (!ConfirmBrowserCookieAccess()) return;
+            if (!await EnsureNodeTesterConnectedAsync(showError: true)
+                || NodeGroupComboBox.SelectedItem is not ProxyInfo group)
+                return;
 
-            var bootstrap = NodeResults
-                .Where(result => result.ClashDelayMs > 0)
-                .OrderBy(result => result.ClashDelayMs)
-                .First();
-            var routeGroup = ResolveNodeTestRouteGroup(
-                group.Name,
-                nodes.Select(node => node.Name));
-            await BeginNodeTestRoutingAsync(
-                routeGroup,
-                _nodeTestCancellation.Token);
-            NodeTestStatusText.Text =
-                $"第一关完成：{nodes.Count} → {clashReachableCount}；"
-                + (routeGroup.Equals("GLOBAL", StringComparison.OrdinalIgnoreCase)
-                    ? "测速期间将临时使用全局模式并在结束后恢复；"
-                    : "")
-                + $"正在临时使用 {bootstrap.Name} 读取画廊图片地址…";
-            await _mihomoClient.SelectProxyAsync(
-                routeGroup, bootstrap.Name, _nodeTestCancellation.Token);
-            await Task.Delay(350, _nodeTestCancellation.Token);
-            _gallerySamples = await GallerySampleService.GetSampleUrlsAsync(
-                engine,
-                url,
-                options,
-                maximumItems: 1,
-                cancellationToken: _nodeTestCancellation.Token);
-            _gallerySampleRefresh = cancellationToken =>
-                GallerySampleService.GetSampleUrlsAsync(
+            var nodes = GetNodeCandidates(group);
+            if (nodes.Count == 0) return;
+            var testAllReachable =
+                GetSelectedTag(NodeTestModeComboBox, "smart") == "all";
+            if (testAllReachable && nodes.Count >= 40)
+            {
+                var answer = MessageBox.Show(
+                    $"将先用 Clash 并发剔除断线节点，再对所有可联网节点进行真实图片下载测速。"
+                    + $"\n当前策略组共有 {nodes.Count} 个节点，完整模式可能耗时较长。\n\n"
+                    + "测试期间会保存并最终恢复当前节点。是否继续？",
+                    "确认完整检测",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Question);
+                if (answer != MessageBoxResult.Yes) return;
+            }
+
+            var engine = _engineManager.FindEngine();
+            if (engine is null)
+            {
+                MessageBox.Show(
+                    "缺少 gallery-dl 下载内核，请先安装内核。",
+                    "无法开始",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                return;
+            }
+
+            NodeResults.Clear();
+            _gallerySamples = null;
+            _gallerySampleRefresh = null;
+            foreach (var node in nodes)
+            {
+                NodeResults.Add(new NodeProbeResult
+                {
+                    Name = node.Name,
+                    Type = node.Type
+                });
+            }
+            _resultGroup = group.Name;
+
+            IReadOnlyList<NodeProbeResult> realTestCandidates = [];
+            var clashReachableCount = 0;
+            var screeningCompleted = false;
+            var options = CreateJob(url).Options;
+            try
+            {
+                _isNodeTesting = true;
+                _nodeTestCancellation = new CancellationTokenSource();
+                NodeTestStatusText.Text =
+                    $"第一关：正在要求 Clash 对 {nodes.Count} 个节点发起本轮检测，不读取历史延迟…";
+                SetRunningUi(false);
+                SetNodeTestingUi(true);
+                ActivityProgressBar.IsIndeterminate = true;
+
+                var clashDelays = await _mihomoClient!.RefreshAndMeasureGroupDelaysAsync(
+                    group.Name,
+                    nodes.Select(node => node.Name).ToArray(),
+                    new Uri("https://www.gstatic.com/generate_204"),
+                    timeoutMilliseconds: 3000,
+                    expectedStatus: "200-299",
+                    _nodeTestCancellation.Token);
+                NodeTestStatusText.Text =
+                    "Clash 本轮主动检测已完成，正在按最新结果筛选节点…";
+                foreach (var result in NodeResults)
+                {
+                    result.ClashScreened = true;
+                    result.ClashDelayMs =
+                        clashDelays.TryGetValue(result.Name, out var delay) ? delay : 0;
+                    if (result.ClashDelayMs <= 0)
+                    {
+                        result.Rating = "已淘汰";
+                        result.Status = "Clash 检测 Error";
+                        result.Details =
+                            "第一关无法通过 Clash 的短连接测试，不再进行耗时的真实图片下载。";
+                    }
+                }
+                clashReachableCount = NodeResults.Count(result => result.ClashDelayMs > 0);
+                SortNodeResults();
+                if (clashReachableCount == 0)
+                    throw new InvalidOperationException(
+                        "Clash 快速检测没有找到可连接节点。请确认所选策略组正确，或稍后重试。");
+
+                var bootstrap = NodeResults
+                    .Where(result => result.ClashDelayMs > 0)
+                    .OrderBy(result => result.ClashDelayMs)
+                    .First();
+                var routeGroup = ResolveNodeTestRouteGroup(
+                    group.Name,
+                    nodes.Select(node => node.Name));
+                await BeginNodeTestRoutingAsync(
+                    routeGroup,
+                    _nodeTestCancellation.Token);
+                NodeTestStatusText.Text =
+                    $"第一关完成：{nodes.Count} → {clashReachableCount}；"
+                    + (routeGroup.Equals("GLOBAL", StringComparison.OrdinalIgnoreCase)
+                        ? "测速期间将临时使用全局模式并在结束后恢复；"
+                        : "")
+                    + $"正在临时使用 {bootstrap.Name} 读取画廊图片地址…";
+                await _mihomoClient.SelectProxyAsync(
+                    routeGroup, bootstrap.Name, _nodeTestCancellation.Token);
+                await Task.Delay(350, _nodeTestCancellation.Token);
+                _gallerySamples = await GallerySampleService.GetSampleUrlsAsync(
                     engine,
                     url,
                     options,
                     maximumItems: 1,
-                    cancellationToken: cancellationToken);
+                    cancellationToken: _nodeTestCancellation.Token);
+                _gallerySampleRefresh = cancellationToken =>
+                    GallerySampleService.GetSampleUrlsAsync(
+                        engine,
+                        url,
+                        options,
+                        maximumItems: 1,
+                        cancellationToken: cancellationToken);
 
-            realTestCandidates = NodeScreeningLogic.SelectForRealTest(
-                NodeResults,
-                testAllReachable,
-                NodeScreeningLogic.DefaultSmartLimit);
-            foreach (var result in NodeResults.Where(result => result.ClashDelayMs > 0))
-            {
-                result.EligibleForRealTest = realTestCandidates.Contains(result);
-                if (result.EligibleForRealTest)
+                realTestCandidates = NodeScreeningLogic.SelectForRealTest(
+                    NodeResults,
+                    testAllReachable,
+                    NodeScreeningLogic.DefaultSmartLimit);
+                foreach (var result in NodeResults.Where(result => result.ClashDelayMs > 0))
                 {
-                    result.Rating = "待实测";
-                    result.Status = "Clash 可用，等待真实下载";
-                    result.Details =
-                        $"Clash 延迟 {result.ClashDelayMs} ms。"
-                        + "接下来会真实读取图片数据；首次失败时会重新分配图片服务器再试一次。";
+                    result.EligibleForRealTest = realTestCandidates.Contains(result);
+                    if (result.EligibleForRealTest)
+                    {
+                        result.Rating = "待实测";
+                        result.Status = "Clash 可用，等待真实下载";
+                        result.Details =
+                            $"Clash 延迟 {result.ClashDelayMs} ms。"
+                            + "接下来会真实读取图片数据；首次失败时会重新分配图片服务器再试一次。";
+                    }
+                    else
+                    {
+                        result.Rating = "候选保留";
+                        result.Status = "智能模式暂不实测";
+                        result.Details =
+                            "Clash 联网检测通过；为缩短时间，本轮不进行真实下载。"
+                            + "可选择“检测全部可用节点”重新测试。";
+                    }
                 }
-                else
-                {
-                    result.Rating = "候选保留";
-                    result.Status = "智能模式暂不实测";
-                    result.Details =
-                        "Clash 联网检测通过；为缩短时间，本轮不进行真实下载。"
-                        + "可选择“检测全部可用节点”重新测试。";
-                }
+                SortNodeResults();
+                if (realTestCandidates.Count == 0)
+                    throw new InvalidOperationException(
+                        "Clash 快速检测没有留下可用于真实测速的节点。建议稍后重试。");
+
+                screeningCompleted = true;
             }
-            SortNodeResults();
-            if (realTestCandidates.Count == 0)
-                throw new InvalidOperationException(
-                    "Clash 快速检测没有留下可用于真实测速的节点。建议稍后重试。");
+            catch (OperationCanceledException)
+            {
+                NodeTestStatusText.Text = "智能筛选已停止，正在恢复测试前使用的节点。";
+            }
+            catch (Exception ex)
+            {
+                NodeTestStatusText.Text = FriendlyError(ex.Message);
+                MessageBox.Show(
+                    NodeTestStatusText.Text,
+                    "节点筛选未完成",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+            }
+            finally
+            {
+                if (!string.IsNullOrWhiteSpace(_nodeTestGroup) && !await RestoreNodeAfterTestAsync())
+                    screeningCompleted = false;
+                _nodeTestCancellation?.Dispose();
+                _nodeTestCancellation = null;
+                _isNodeTesting = false;
+                ActivityProgressBar.IsIndeterminate = false;
+                ActivityProgressBar.Value = 0;
+                SetRunningUi(false);
+                SetNodeTestingUi(false);
+            }
 
-            screeningCompleted = true;
+            if (!screeningCompleted) return;
+            var gallerySamples = _gallerySamples
+                                 ?? throw new InvalidOperationException("画廊测试地址意外丢失。");
+            var summary =
+                $"{nodes.Count}→{clashReachableCount}→{realTestCandidates.Count}";
+            NodeTestStatusText.Text =
+                $"快速筛选完成（总数→联网→实测：{summary}），开始真实图片下载测速…";
+            await RunNodeTestStageAsync(
+                group.Name,
+                realTestCandidates,
+                gallerySamples.Take(1).ToList(),
+                512L * 1024,
+                5,
+                $"真实快测 {summary}",
+                _gallerySampleRefresh);
         }
-        catch (OperationCanceledException)
-        {
-            NodeTestStatusText.Text = "智能筛选已停止，正在恢复测试前使用的节点。";
-        }
-        catch (Exception ex)
-        {
-            NodeTestStatusText.Text = FriendlyError(ex.Message);
-            MessageBox.Show(
-                NodeTestStatusText.Text,
-                "节点筛选未完成",
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
-        }
+        catch (Exception ex) { NodeTestStatusText.Text = FriendlyError(ex.Message); }
         finally
         {
-            if (!string.IsNullOrWhiteSpace(_nodeTestGroup))
-                await RestoreNodeAfterTestAsync();
-            _nodeTestCancellation?.Dispose();
-            _nodeTestCancellation = null;
-            _isNodeTesting = false;
-            ActivityProgressBar.IsIndeterminate = false;
-            ActivityProgressBar.Value = 0;
+            _isPreparingNodeTest = false;
             SetRunningUi(false);
-            SetNodeTestingUi(false);
         }
-
-        if (!screeningCompleted) return;
-        var gallerySamples = _gallerySamples
-                             ?? throw new InvalidOperationException("画廊测试地址意外丢失。");
-        var summary =
-            $"{nodes.Count}→{clashReachableCount}→{realTestCandidates.Count}";
-        NodeTestStatusText.Text =
-            $"快速筛选完成（总数→联网→实测：{summary}），开始真实图片下载测速…";
-        await RunNodeTestStageAsync(
-            group.Name,
-            realTestCandidates,
-            gallerySamples.Take(1).ToList(),
-            512L * 1024,
-            5,
-            $"真实快测 {summary}",
-            _gallerySampleRefresh);
     }
 
     private async void PreciseNodeTestButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_runningJob is not null || _isNodeTesting || _gallerySamples is null
+        if (IsOperationBusy || _gallerySamples is null
             || string.IsNullOrWhiteSpace(_resultGroup))
             return;
         var finalists = NodeResults
@@ -2070,6 +2222,9 @@ public partial class MainWindow : Window
             results.Select(result => result.Name));
 
         _nodeTestCancellation = new CancellationTokenSource();
+        _isNodeTesting = true;
+        SetRunningUi(false);
+        SetNodeTestingUi(true);
         try
         {
             await BeginNodeTestRoutingAsync(
@@ -2078,11 +2233,15 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
+            var restored = true;
             if (!string.IsNullOrWhiteSpace(_nodeTestGroup))
-                await RestoreNodeAfterTestAsync();
+                restored = await RestoreNodeAfterTestAsync();
             _nodeTestCancellation.Dispose();
             _nodeTestCancellation = null;
-            NodeTestStatusText.Text =
+            _isNodeTesting = false;
+            SetRunningUi(false);
+            SetNodeTestingUi(false);
+            if (restored) NodeTestStatusText.Text =
                 $"无法建立独立的节点测速通道：{FriendlyError(ex.Message)}";
             return;
         }
@@ -2092,11 +2251,11 @@ public partial class MainWindow : Window
         ActivityProgressBar.IsIndeterminate = false;
         ActivityProgressBar.Value = 0;
         var completedNormally = true;
-        var probeOptions = CreateJob(UrlTextBox.Text.Trim()).Options;
+        var probeOptions = CreateJob(_nodeTestGalleryUrl ?? "").Options;
         var service = new GalleryNodeTestService(
             _mihomoClient,
             NormalizeProxy(ProxyTextBox.Text),
-            UrlTextBox.Text.Trim(),
+            _nodeTestGalleryUrl,
             GetSelectedTag(LoginModeComboBox, "manual") == "manual"
                 ? GetManualCookie()
                 : null,
@@ -2149,7 +2308,7 @@ public partial class MainWindow : Window
         }
         finally
         {
-            await RestoreNodeAfterTestAsync();
+            var restored = await RestoreNodeAfterTestAsync();
             _nodeTestCancellation.Dispose();
             _nodeTestCancellation = null;
             _isNodeTesting = false;
@@ -2165,15 +2324,12 @@ public partial class MainWindow : Window
 
             var best = NodeResults.FirstOrDefault(result =>
                 result.SuccessfulSamples == result.SampleCount && result.SampleCount > 0);
-            NodeTestStatusText.Text = completedNormally
+            if (restored) NodeTestStatusText.Text = completedNormally
                 ? best is null
                     ? $"{stageName}完成，但没有稳定通过的节点。可以换一个策略组再试。"
                     : $"{stageName}完成，已恢复原节点。当前推荐：{best.Name}；选中后点击“使用选中节点”。"
                 : "测试已停止，并已恢复测试前使用的节点。";
-            PreciseNodeTestButton.IsEnabled =
-                NodeResults.Any(result => result.SuccessfulSamples > 0);
-            UseTestedNodeButton.IsEnabled =
-                NodeResultsGrid.SelectedItem is NodeProbeResult;
+            SetRunningUi(false);
         }
     }
 
@@ -2232,20 +2388,20 @@ public partial class MainWindow : Window
     private void SetNodeTestingUi(bool testing)
     {
         QuickNodeTestButton.IsEnabled = !testing
-                                        && _runningJob is null
+                                        && !IsOperationBusy
                                         && NodeGroupComboBox.SelectedItem is ProxyInfo;
-        PreciseNodeTestButton.IsEnabled = !testing
+        PreciseNodeTestButton.IsEnabled = !testing && !IsOperationBusy
                                           && NodeResults.Any(result =>
                                               result.SuccessfulSamples > 0);
         StopNodeTestButton.IsEnabled = testing;
-        UseTestedNodeButton.IsEnabled = !testing
+        UseTestedNodeButton.IsEnabled = !testing && !IsOperationBusy
                                         && NodeResultsGrid.SelectedItem is NodeProbeResult
                                         {
                                             SuccessfulSamples: > 0
                                         };
-        NodeGroupComboBox.IsEnabled = !testing;
-        NodeTestModeComboBox.IsEnabled = !testing;
-        OpenNodeTestButton.IsEnabled = !testing && _runningJob is null;
+        NodeGroupComboBox.IsEnabled = !testing && !IsOperationBusy;
+        NodeTestModeComboBox.IsEnabled = !testing && !IsOperationBusy;
+        OpenNodeTestButton.IsEnabled = !testing && !IsOperationBusy;
     }
 
     private void StopNodeTestButton_Click(object sender, RoutedEventArgs e)
@@ -2257,13 +2413,15 @@ public partial class MainWindow : Window
 
     private async void UseTestedNodeButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_isNodeTesting || _mihomoClient is null
+        if (IsOperationBusy || _mihomoClient is null
             || string.IsNullOrWhiteSpace(_resultGroup)
             || NodeResultsGrid.SelectedItem is not NodeProbeResult
             {
                 SuccessfulSamples: > 0
             } result)
             return;
+        _isPreparingNodeTest = true;
+        SetRunningUi(false);
         try
         {
             await _mihomoClient.SelectProxyAsync(_resultGroup, result.Name);
@@ -2280,12 +2438,17 @@ public partial class MainWindow : Window
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
         }
+        finally
+        {
+            _isPreparingNodeTest = false;
+            SetRunningUi(false);
+        }
     }
 
     private void NodeResultsGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         UseTestedNodeButton.IsEnabled =
-            !_isNodeTesting
+            !IsOperationBusy
             && NodeResultsGrid.SelectedItem is NodeProbeResult
             {
                 SuccessfulSamples: > 0
@@ -2300,19 +2463,16 @@ public partial class MainWindow : Window
     {
         if (_mihomoClient is null || string.IsNullOrWhiteSpace(_nodeTestGroup)
             || string.IsNullOrWhiteSpace(_nodeBeforeTest))
-            return;
-        try
-        {
-            Directory.CreateDirectory(SettingsStore.DataDirectory);
-            var recovery = new NodeTestRecoveryState(
-                _mihomoClient.Endpoint,
-                _nodeTestGroup,
-                _nodeBeforeTest,
-                _modeBeforeNodeTest ?? "");
-            await File.WriteAllTextAsync(
-                _nodeRecoveryPath, JsonSerializer.Serialize(recovery));
-        }
-        catch { }
+            throw new InvalidOperationException("无法确定当前节点，已取消测速以保护原连接。");
+        Directory.CreateDirectory(SettingsStore.DataDirectory);
+        var recovery = new NodeTestRecoveryState(
+            _mihomoClient.Endpoint,
+            _nodeTestGroup,
+            _nodeBeforeTest,
+            _modeBeforeNodeTest ?? "");
+        // Do not change routing unless recovery information is safely saved.
+        SettingsStore.WriteAllTextAtomic(_nodeRecoveryPath, JsonSerializer.Serialize(recovery));
+        await Task.CompletedTask;
     }
 
     private async Task TryRecoverInterruptedNodeTestAsync()
@@ -2340,11 +2500,11 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task RestoreNodeAfterTestAsync()
+    private async Task<bool> RestoreNodeAfterTestAsync()
     {
         if (_mihomoClient is null || string.IsNullOrWhiteSpace(_nodeTestGroup)
             || string.IsNullOrWhiteSpace(_nodeBeforeTest))
-            return;
+            return true;
         try
         {
             await _mihomoClient.SelectProxyAsync(
@@ -2353,13 +2513,15 @@ public partial class MainWindow : Window
                 await _mihomoClient.SetModeAsync(
                     _modeBeforeNodeTest,
                     CancellationToken.None);
-            if (File.Exists(_nodeRecoveryPath)) File.Delete(_nodeRecoveryPath);
             _clashState = await _mihomoClient.GetStateAsync();
+            if (File.Exists(_nodeRecoveryPath)) File.Delete(_nodeRecoveryPath);
+            return true;
         }
         catch
         {
             NodeTestStatusText.Text =
                 "暂时无法恢复原节点，已保存恢复记录；下次打开选线面板时会自动恢复。";
+            return false;
         }
         finally
         {

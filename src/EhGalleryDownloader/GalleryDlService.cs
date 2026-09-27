@@ -10,6 +10,7 @@ public sealed class GalleryDlService : IDisposable
 {
     private Process? _process;
     private readonly object _gate = new();
+    private readonly object _parseGate = new();
     private string _lastRawError = "";
     private int _resumeAnchorIndex;
     private readonly DownloadProgressTracker _progressTracker = new();
@@ -108,7 +109,7 @@ public sealed class GalleryDlService : IDisposable
         Task progressTask = Task.CompletedTask;
         using var progressCancellation =
             CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        var progressCursor = new ProgressFileCursor();
+        var progressCursor = new ProgressFileReader();
         try
         {
             process.Start();
@@ -145,7 +146,7 @@ public sealed class GalleryDlService : IDisposable
         {
             progressCancellation.Cancel();
             try { await progressTask.ConfigureAwait(false); } catch { }
-            DrainProgressFile(progressPath, progressCursor);
+            DrainProgressFile(progressPath, progressCursor, final: true);
             lock (_gate)
             {
                 if (ReferenceEquals(_process, process)) _process = null;
@@ -251,6 +252,11 @@ public sealed class GalleryDlService : IDisposable
 
     private void ParseLine(string raw, bool isError)
     {
+        lock (_parseGate) ParseLineCore(raw, isError);
+    }
+
+    private void ParseLineCore(string raw, bool isError)
+    {
         var line = StripAnsi(raw).Trim();
         if (line.Length == 0) return;
         if (line.Contains('\uFFFD'))
@@ -277,13 +283,14 @@ public sealed class GalleryDlService : IDisposable
                 case GalleryDlEventKind.Success:
                 case GalleryDlEventKind.Skip:
                 case GalleryDlEventKind.Failure:
-                    // The existing anchor was already included in the local prefix.
-                    if (marker.Current == _resumeAnchorIndex) break;
                     if (_accounting.TryRecordTerminal(
                             marker.Kind, marker.Path, out var previous))
                     {
-                        if (previous is { } old) ReportFileDelta(old, -1);
-                        ReportFileDelta(marker.Kind, 1);
+                        var anchor = _resumeAnchorIndex > 0 && marker.Current == _resumeAnchorIndex;
+                        if (previous is { } old && (!anchor || old == GalleryDlEventKind.Failure))
+                            ReportFileDelta(old, -1);
+                        if (!anchor || marker.Kind == GalleryDlEventKind.Failure)
+                            ReportFileDelta(marker.Kind, 1);
                         ReportProgress(marker);
                     }
                     break;
@@ -301,14 +308,9 @@ public sealed class GalleryDlService : IDisposable
         OutputReceived?.Invoke(ToChineseMessage(line));
     }
 
-    private sealed class ProgressFileCursor
-    {
-        public int LinesRead { get; set; }
-    }
-
     private async Task MonitorProgressFileAsync(
         string path,
-        ProgressFileCursor cursor,
+        ProgressFileReader cursor,
         CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
@@ -325,29 +327,10 @@ public sealed class GalleryDlService : IDisposable
         }
     }
 
-    private void DrainProgressFile(string path, ProgressFileCursor cursor)
+    private void DrainProgressFile(string path, ProgressFileReader cursor, bool final = false)
     {
-        try
-        {
-            if (!File.Exists(path)) return;
-            var lines = new List<string>();
-            using (var stream = new FileStream(
-                       path, FileMode.Open, FileAccess.Read,
-                       FileShare.ReadWrite | FileShare.Delete))
-            using (var reader = new StreamReader(
-                       stream, new UTF8Encoding(false, false),
-                       detectEncodingFromByteOrderMarks: true))
-            {
-                while (reader.ReadLine() is { } line) lines.Add(line);
-            }
-
-            if (lines.Count < cursor.LinesRead) cursor.LinesRead = 0;
-            for (var index = cursor.LinesRead; index < lines.Count; index++)
-                ParseLine(lines[index], isError: false);
-            cursor.LinesRead = lines.Count;
-        }
-        catch (IOException) { }
-        catch (UnauthorizedAccessException) { }
+        foreach (var line in cursor.ReadAvailable(path, final))
+            ParseLine(line, isError: false);
     }
 
     private void ReportFileDelta(GalleryDlEventKind kind, int delta)

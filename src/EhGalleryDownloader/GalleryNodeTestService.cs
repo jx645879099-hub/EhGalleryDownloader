@@ -210,6 +210,10 @@ public sealed class GalleryNodeTestService
             PooledConnectionIdleTimeout = TimeSpan.Zero,
             MaxConnectionsPerServer = 1
         };
+        if (CookieParser.CanSendTo(url)
+            && CookieParser.TryParse(_cookieHeader, out var scopedCookies, out _))
+            foreach (var cookie in scopedCookies)
+                handler.CookieContainer.Add(url, new Cookie(cookie.Key, cookie.Value) { Secure = true, HttpOnly = true });
         using var http = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
         http.DefaultRequestHeaders.UserAgent.ParseAdd(
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
@@ -235,8 +239,6 @@ public sealed class GalleryNodeTestService
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
             if (_referer is not null)
                 request.Headers.Referrer = _referer;
-            if (!string.IsNullOrWhiteSpace(_cookieHeader))
-                request.Headers.TryAddWithoutValidation("Cookie", _cookieHeader);
             using var response = await http.SendAsync(
                 request,
                 HttpCompletionOption.ResponseHeadersRead,
@@ -333,7 +335,7 @@ public sealed class GalleryNodeTestService
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
         request.Headers.Accept.ParseAdd("image/avif,image/webp,image/*,*/*;q=0.8");
         if (_referer is not null) request.Headers.Referrer = _referer;
-        if (!string.IsNullOrWhiteSpace(_cookieHeader))
+        if (!string.IsNullOrWhiteSpace(_cookieHeader) && CookieParser.CanSendTo(url))
             request.Headers.TryAddWithoutValidation("Cookie", _cookieHeader);
 
         using var response = await http.SendAsync(
@@ -449,6 +451,12 @@ public sealed class GalleryNodeTestService
         finally
         {
             timer.Stop();
+            verifyCancellation.Cancel();
+            // A cancelled probe must not leave its temporary download behind.
+            try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch { }
+            try { await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(3)); } catch { }
+            received = Math.Max(received, MeasureDirectoryBytes(directory));
+            try { Directory.Delete(directory, recursive: true); } catch { }
         }
 
         var verified = await StopVerificationAsync(verification, verifyCancellation);

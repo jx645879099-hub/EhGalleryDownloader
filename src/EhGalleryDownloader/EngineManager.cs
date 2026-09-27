@@ -58,22 +58,12 @@ public sealed class EngineManager
             if (File.Exists(path))
                 return path;
 
-        try
+        foreach (var directory in (Environment.GetEnvironmentVariable("PATH") ?? "")
+                     .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
         {
-            using var process = Process.Start(new ProcessStartInfo
-            {
-                FileName = "where.exe",
-                Arguments = "gallery-dl.exe",
-                RedirectStandardOutput = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            });
-            var result = process?.StandardOutput.ReadLine();
-            process?.WaitForExit(3000);
-            if (!string.IsNullOrWhiteSpace(result) && File.Exists(result))
-                return result;
+            var candidate = Path.Combine(directory.Trim().Trim('"'), "gallery-dl.exe");
+            if (File.Exists(candidate)) return candidate;
         }
-        catch { }
 
         return null;
     }
@@ -134,6 +124,7 @@ public sealed class EngineManager
                 EngineUpdateFailureKind.TimedOut,
                 "连接官方发布页超时。");
         }
+        catch (OperationCanceledException) { throw; }
         catch (HttpRequestException ex) when (
             ex.Message.Contains("proxy", StringComparison.OrdinalIgnoreCase)
             || ex.Message.Contains("refused", StringComparison.OrdinalIgnoreCase))
@@ -164,6 +155,10 @@ public sealed class EngineManager
     {
         Directory.CreateDirectory(Path.GetDirectoryName(BundledEnginePath)!);
         var tempPath = BundledEnginePath + ".update.exe";
+        var callerToken = cancellationToken;
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(TimeSpan.FromMinutes(8));
+        cancellationToken = deadline.Token;
 
         try
         {
@@ -226,9 +221,15 @@ public sealed class EngineManager
                     EngineUpdateFailureKind.InvalidDownload,
                     "下载文件无法启动，原来的内核没有被覆盖。");
 
+            cancellationToken.ThrowIfCancellationRequested();
             File.Move(tempPath, BundledEnginePath, true);
             progress?.Report(100);
             return BundledEnginePath;
+        }
+        catch (OperationCanceledException) when (!callerToken.IsCancellationRequested)
+        {
+            throw new EngineUpdateException(EngineUpdateFailureKind.TimedOut,
+                "下载内核超时，原来的内核已保留。请检查连接后重试。");
         }
         catch (OperationCanceledException)
         {
@@ -280,10 +281,25 @@ public sealed class EngineManager
             }
         };
         process.Start();
-        var output = await process.StandardOutput.ReadToEndAsync(cancellationToken)
-            .ConfigureAwait(false);
-        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-        return process.ExitCode == 0 ? output.Trim() : null;
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(TimeSpan.FromSeconds(10));
+        using var registration = deadline.Token.Register(() =>
+        {
+            try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch { }
+        });
+        try
+        {
+            var output = process.StandardOutput.ReadToEndAsync(deadline.Token);
+            var error = process.StandardError.ReadToEndAsync(deadline.Token);
+            await Task.WhenAll(output, error, process.WaitForExitAsync(deadline.Token))
+                .ConfigureAwait(false);
+            deadline.Token.ThrowIfCancellationRequested();
+            return process.ExitCode == 0 ? (await output).Trim() : null;
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new TimeoutException("下载内核在 10 秒内没有响应版本检查，请重新检查或更新内核。");
+        }
     }
 
     private static string ExtractReleaseTag(HttpResponseMessage response)
@@ -328,7 +344,11 @@ public sealed class EngineManager
         bool allowAutoRedirect,
         TimeSpan timeout)
     {
-        var handler = new HttpClientHandler { AllowAutoRedirect = allowAutoRedirect };
+        var handler = new HttpClientHandler
+        {
+            AllowAutoRedirect = allowAutoRedirect,
+            UseProxy = !string.IsNullOrWhiteSpace(proxyUrl)
+        };
         if (!string.IsNullOrWhiteSpace(proxyUrl))
         {
             handler.Proxy = new WebProxy(proxyUrl);
@@ -394,7 +414,9 @@ public static class ReleaseAssetParser
                 EngineUpdateFailureKind.ReleaseUnavailable,
                 $"官方版本 {tag} 中暂时没有找到 64 位 Windows 内核。");
 
-        var digestWindowLength = Math.Min(1200, html.Length - selected.Match.Index);
+        var nextAsset = matches.FirstOrDefault(item => item.Match.Index > selected.Match.Index);
+        var digestWindowLength = Math.Min(1200,
+            (nextAsset?.Match.Index ?? html.Length) - selected.Match.Index);
         var digestWindow = html.Substring(selected.Match.Index, digestWindowLength);
         var digestMatch = DigestRegex.Match(digestWindow);
         var digest = digestMatch.Success

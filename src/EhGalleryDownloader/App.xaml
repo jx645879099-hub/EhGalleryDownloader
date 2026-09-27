@@ -33,9 +33,6 @@
             <Setter Property="TextOptions.TextFormattingMode" Value="Display"/>
             <Setter Property="TextOptions.TextRenderingMode" Value="ClearType"/>
         </Style>
-        <Style TargetType="TextBlock">
-            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
-        </Style>
         <Style TargetType="Label">
             <Setter Property="Foreground" Value="{StaticResource SubTextBrush}"/>
             <Setter Property="Padding" Value="0,0,0,5"/>

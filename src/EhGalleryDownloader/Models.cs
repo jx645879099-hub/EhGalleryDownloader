@@ -27,8 +27,8 @@ public sealed class DownloadJob : INotifyPropertyChanged
     public required DownloadOptions Options { get; set; }
     public string? BlockedEngineVersion { get; set; }
 
-    public string State { get => _state; set { if (Set(ref _state, value)) NotifyProgressChanged(); } }
-    public string CurrentFile { get => _currentFile; set => Set(ref _currentFile, value); }
+    public string State { get => _state; set { if (Set(ref _state, value)) { NotifyProgressChanged(); NotifyStatusChanged(); } } }
+    public string CurrentFile { get => _currentFile; set { if (Set(ref _currentFile, value)) OnPropertyChanged(nameof(PhaseText)); } }
     public int CompletedFiles { get => _completedFiles; set { if (Set(ref _completedFiles, value)) NotifyProgressChanged(); } }
     public int SkippedFiles { get => _skippedFiles; set { if (Set(ref _skippedFiles, value)) NotifyProgressChanged(); } }
     public int FailedFiles { get => _failedFiles; set { if (Set(ref _failedFiles, value)) NotifyProgressChanged(); } }
@@ -39,6 +39,26 @@ public sealed class DownloadJob : INotifyPropertyChanged
     public double SpeedMbPerSecond { get => _speedMbPerSecond; set { if (Set(ref _speedMbPerSecond, value)) OnPropertyChanged(nameof(SpeedText)); } }
     public string EstimatedRemaining { get => _estimatedRemaining; set => Set(ref _estimatedRemaining, value); }
     public string GalleryTitle { get => _galleryTitle; set { if (Set(ref _galleryTitle, value)) OnPropertyChanged(nameof(GalleryDisplayName)); } }
+
+    public bool IsActive => State is "下载中" or "自动续传" or "准备中";
+    public bool NeedsAttention => State is "失败" or "需要更新内核";
+    public string StatusLabel => State == "已停止" ? "已暂停" : State;
+    public string ActionLabel => State == "已完成" ? "检查缺失图片" : "继续下载";
+    public string PhaseText => State switch
+    {
+        "失败" => "下载中断 · 已完成的图片已保留",
+        "需要更新内核" => "请先更新下载内核，再继续此任务",
+        "已停止" => "已暂停 · 随时可以继续",
+        "已完成" => "下载完成",
+        "排队中" or "等待" => "等待开始",
+        "准备中" => "正在检查连接和本地断点",
+        _ => CurrentFile is "—" or "" ? "正在读取画廊信息" : "正在下载图片"
+    };
+    public string StatusColor => NeedsAttention ? "#B42318"
+        : State == "已完成" ? "#067647" : IsActive ? "#175CD3" : "#475467";
+    public string StatusBackground => NeedsAttention ? "#FEF3F2"
+        : State == "已完成" ? "#ECFDF3" : IsActive ? "#EFF8FF" : "#F2F4F7";
+    public DateTime AttemptStartedAt { get => _attemptStartedAt; set => _attemptStartedAt = value; }
 
     public string ProgressText => TotalFiles > 0
         ? $"{CompletedFiles + SkippedFiles} / {TotalFiles} 张 · {ProgressPercent:F0}%"
@@ -64,7 +84,7 @@ public sealed class DownloadJob : INotifyPropertyChanged
         get
         {
             var end = FinishedAt ?? DateTime.Now;
-            var span = end - _attemptStartedAt;
+            var span = end > _attemptStartedAt ? end - _attemptStartedAt : TimeSpan.Zero;
             return span.TotalHours >= 1 ? span.ToString(@"h\:mm\:ss") : span.ToString(@"m\:ss");
         }
     }
@@ -134,6 +154,13 @@ public sealed class DownloadJob : INotifyPropertyChanged
         OnPropertyChanged(nameof(ProgressText));
         OnPropertyChanged(nameof(ProgressPercent));
         OnPropertyChanged(nameof(HasProgress));
+    }
+
+    private void NotifyStatusChanged()
+    {
+        foreach (var name in new[] { nameof(IsActive), nameof(NeedsAttention), nameof(StatusLabel),
+                     nameof(ActionLabel), nameof(PhaseText), nameof(StatusColor), nameof(StatusBackground) })
+            OnPropertyChanged(name);
     }
 
     private void OnPropertyChanged([CallerMemberName] string? name = null) =>

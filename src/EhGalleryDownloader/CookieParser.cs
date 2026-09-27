@@ -2,6 +2,12 @@ namespace EhGalleryDownloader;
 
 public static class CookieParser
 {
+    public static bool CanSendTo(Uri uri) => uri.Scheme == "https"
+        && (uri.Host.Equals("e-hentai.org", StringComparison.OrdinalIgnoreCase)
+            || uri.Host.EndsWith(".e-hentai.org", StringComparison.OrdinalIgnoreCase)
+            || uri.Host.Equals("exhentai.org", StringComparison.OrdinalIgnoreCase)
+            || uri.Host.EndsWith(".exhentai.org", StringComparison.OrdinalIgnoreCase));
+
     public static bool TryParse(string? input, out Dictionary<string, string> cookies, out string error)
     {
         cookies = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);

@@ -20,7 +20,11 @@ public static class ApplicationUpdateService
         string? proxyUrl,
         CancellationToken cancellationToken = default)
     {
-        var handler = new HttpClientHandler { AllowAutoRedirect = false };
+        var handler = new HttpClientHandler
+        {
+            AllowAutoRedirect = false,
+            UseProxy = !string.IsNullOrWhiteSpace(proxyUrl)
+        };
         if (!string.IsNullOrWhiteSpace(proxyUrl))
         {
             handler.Proxy = new WebProxy(proxyUrl);

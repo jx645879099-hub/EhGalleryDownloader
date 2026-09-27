@@ -70,8 +70,16 @@ public sealed class BrowserCookieImportServer : IAsyncDisposable
             {
                 using var client = await _listener.AcceptTcpClientAsync(linked.Token)
                     .ConfigureAwait(false);
-                var result = await HandleClientAsync(client, linked.Token).ConfigureAwait(false);
-                if (result is not null) return result;
+                using var clientDeadline = CancellationTokenSource.CreateLinkedTokenSource(linked.Token);
+                clientDeadline.CancelAfter(TimeSpan.FromSeconds(5));
+                try
+                {
+                    var result = await HandleClientAsync(client, clientDeadline.Token).ConfigureAwait(false);
+                    if (result is not null) return result;
+                }
+                catch (OperationCanceledException) when (!linked.IsCancellationRequested) { }
+                catch (IOException) { }
+                catch (SocketException) { }
             }
         }
         catch (OperationCanceledException) when (
@@ -101,7 +109,9 @@ public sealed class BrowserCookieImportServer : IAsyncDisposable
         var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var cookie in payload.Cookies)
         {
-            if (!allowedNames.Contains(cookie.Name)
+            if (cookie is null || string.IsNullOrWhiteSpace(cookie.Name)
+                || string.IsNullOrWhiteSpace(cookie.Domain)
+                || !allowedNames.Contains(cookie.Name)
                 || !IsAllowedDomain(cookie.Domain)
                 || string.IsNullOrWhiteSpace(cookie.Value)
                 || cookie.Value.Length > 4096
@@ -124,8 +134,6 @@ public sealed class BrowserCookieImportServer : IAsyncDisposable
         TcpClient client,
         CancellationToken cancellationToken)
     {
-        client.ReceiveTimeout = 5000;
-        client.SendTimeout = 5000;
         await using var stream = client.GetStream();
         var request = await ReadRequestAsync(stream, cancellationToken).ConfigureAwait(false);
         if (request is null) return null;
@@ -134,14 +142,14 @@ public sealed class BrowserCookieImportServer : IAsyncDisposable
             "chrome-extension://", StringComparison.OrdinalIgnoreCase);
         if (request.Method == "OPTIONS")
         {
-            await WriteResponseAsync(stream, originAllowed ? 204 : 403, "", request.Origin)
+            await WriteResponseAsync(stream, originAllowed ? 204 : 403, "", request.Origin, cancellationToken)
                 .ConfigureAwait(false);
             return null;
         }
 
         if (!originAllowed || request.ExtensionMarker != "1")
         {
-            await WriteResponseAsync(stream, 403, "{\"error\":\"forbidden\"}", "")
+            await WriteResponseAsync(stream, 403, "{\"error\":\"forbidden\"}", "", cancellationToken)
                 .ConfigureAwait(false);
             return null;
         }
@@ -154,13 +162,13 @@ public sealed class BrowserCookieImportServer : IAsyncDisposable
                 app = "EhGalleryDownloader",
                 expiresInSeconds = 120
             });
-            await WriteResponseAsync(stream, 200, json, request.Origin).ConfigureAwait(false);
+            await WriteResponseAsync(stream, 200, json, request.Origin, cancellationToken).ConfigureAwait(false);
             return null;
         }
 
         if (request.Method != "POST" || request.Path != "/import")
         {
-            await WriteResponseAsync(stream, 404, "{\"error\":\"not_found\"}", request.Origin)
+            await WriteResponseAsync(stream, 404, "{\"error\":\"not_found\"}", request.Origin, cancellationToken)
                 .ConfigureAwait(false);
             return null;
         }
@@ -174,14 +182,14 @@ public sealed class BrowserCookieImportServer : IAsyncDisposable
         }
         catch (JsonException)
         {
-            await WriteResponseAsync(stream, 400, "{\"error\":\"invalid_json\"}", request.Origin)
+            await WriteResponseAsync(stream, 400, "{\"error\":\"invalid_json\"}", request.Origin, cancellationToken)
                 .ConfigureAwait(false);
             return null;
         }
 
         if (payload is null || !CryptographicEquals(payload.Token, _token))
         {
-            await WriteResponseAsync(stream, 403, "{\"error\":\"invalid_token\"}", request.Origin)
+            await WriteResponseAsync(stream, 403, "{\"error\":\"invalid_token\"}", request.Origin, cancellationToken)
                 .ConfigureAwait(false);
             return null;
         }
@@ -189,12 +197,12 @@ public sealed class BrowserCookieImportServer : IAsyncDisposable
         if (!TryCreateCookieHeader(payload, out var header, out var error))
         {
             await WriteResponseAsync(
-                    stream, 422, JsonSerializer.Serialize(new { error }), request.Origin)
+                    stream, 422, JsonSerializer.Serialize(new { error }), request.Origin, cancellationToken)
                 .ConfigureAwait(false);
             return null;
         }
 
-        await WriteResponseAsync(stream, 200, "{\"ok\":true}", request.Origin)
+        await WriteResponseAsync(stream, 200, "{\"ok\":true}", request.Origin, cancellationToken)
             .ConfigureAwait(false);
         return new BrowserCookieImportResult(header, payload.Browser, payload.PageUrl);
     }
@@ -239,24 +247,24 @@ public sealed class BrowserCookieImportServer : IAsyncDisposable
         var requestLine = lines[0].Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (requestLine.Length < 2) return null;
 
-        var headers = lines.Skip(1)
-            .Select(line => (Index: line.IndexOf(':'), Line: line))
-            .Where(item => item.Index > 0)
-            .ToDictionary(
-                item => item.Line[..item.Index].Trim(),
-                item => item.Line[(item.Index + 1)..].Trim(),
-                StringComparer.OrdinalIgnoreCase);
-        var contentLength = headers.TryGetValue("Content-Length", out var contentLengthText)
-                            && int.TryParse(contentLengthText, out var parsedLength)
-            ? parsedLength
-            : 0;
-        if (contentLength < 0 || contentLength > MaxRequestBytes) return null;
+        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var line in lines.Skip(1))
+        {
+            var index = line.IndexOf(':');
+            if (index <= 0 || !headers.TryAdd(line[..index].Trim(), line[(index + 1)..].Trim()))
+                return null;
+        }
+        var contentLength = 0;
+        if (headers.ContainsKey("Transfer-Encoding")
+            || (headers.TryGetValue("Content-Length", out var contentLengthText)
+                && !int.TryParse(contentLengthText, out contentLength))
+            || contentLength < 0 || headerEnd + 4 + contentLength > MaxRequestBytes) return null;
 
         var bodyOffset = headerEnd + 4;
         while (bytes.Length - bodyOffset < contentLength)
         {
             var read = await stream.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
-            if (read == 0) break;
+            if (read == 0) return null;
             memory.Write(buffer, 0, read);
             if (memory.Length > MaxRequestBytes) return null;
             bytes = memory.ToArray();
@@ -286,7 +294,8 @@ public sealed class BrowserCookieImportServer : IAsyncDisposable
         NetworkStream stream,
         int statusCode,
         string body,
-        string allowedOrigin)
+        string allowedOrigin,
+        CancellationToken cancellationToken)
     {
         var status = statusCode switch
         {
@@ -314,8 +323,8 @@ public sealed class BrowserCookieImportServer : IAsyncDisposable
         }
         headers.Append("\r\n");
         var headerBytes = Encoding.ASCII.GetBytes(headers.ToString());
-        await stream.WriteAsync(headerBytes).ConfigureAwait(false);
-        if (bodyBytes.Length > 0) await stream.WriteAsync(bodyBytes).ConfigureAwait(false);
+        await stream.WriteAsync(headerBytes, cancellationToken).ConfigureAwait(false);
+        if (bodyBytes.Length > 0) await stream.WriteAsync(bodyBytes, cancellationToken).ConfigureAwait(false);
     }
 
     public ValueTask DisposeAsync()

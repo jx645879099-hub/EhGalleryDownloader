@@ -2,6 +2,27 @@ using System.Diagnostics;
 using System.Security.Cryptography;
 using EhGalleryDownloader;
 
+// Deterministic child process for exercising the real process/progress boundary.
+if (args.Contains("--config-ignore"))
+{
+    Console.OutputEncoding = new System.Text.UTF8Encoding(false);
+    var input = args[^1];
+    var direct = input == "https://exhentai.org/s/abcdef1234/4089450-2";
+    var rangeIndex = Array.IndexOf(args, "--range");
+    if (direct ? rangeIndex >= 0 : rangeIndex < 0 || args[rangeIndex + 1] != "3-") return 92;
+    var destination = args[Array.IndexOf(args, "--destination") + 1];
+    var path = Path.Combine(destination, "new-file.jpg");
+    File.WriteAllBytes(path, [1, 2, 3]);
+    Console.WriteLine("__GUI_META__|4089450|5|Integration fixture");
+    if (direct) Console.WriteLine("__GUI_SKIP__|2|5|anchor.jpg");
+    Console.WriteLine($"__GUI_SUCCESS__|3|5|{path}");
+    Console.WriteLine($"__GUI_SUCCESS__|3|5|{path}");
+    Console.WriteLine("__GUI_SKIP__|4|5|existing.jpg");
+    Console.WriteLine("__GUI_FAILURE__|5|5|failed.jpg");
+    Console.Error.WriteLine("[exhentai][error] fixture failure");
+    return 1;
+}
+
 var projectDirectory = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
     "..", "..", "..", "..", ".."));
 var enginePath = new[]
@@ -47,7 +68,15 @@ Console.WriteLine("PASS: browser import only accepts the three required cookies 
 
 await using (var importServer = BrowserCookieImportServer.Start())
 {
-    var waitForImport = importServer.WaitForImportAsync(TimeSpan.FromSeconds(10));
+    var waitForImport = importServer.WaitForImportAsync(TimeSpan.FromSeconds(15));
+    // A stalled preconnection and duplicate headers must not kill the import session.
+    using var stalledClient = new System.Net.Sockets.TcpClient();
+    await stalledClient.ConnectAsync(System.Net.IPAddress.Loopback, importServer.Port);
+    await stalledClient.GetStream().WriteAsync(System.Text.Encoding.ASCII.GetBytes("GET /session "));
+    using var malformedClient = new System.Net.Sockets.TcpClient();
+    await malformedClient.ConnectAsync(System.Net.IPAddress.Loopback, importServer.Port);
+    await malformedClient.GetStream().WriteAsync(System.Text.Encoding.ASCII.GetBytes(
+        "GET /session HTTP/1.1\r\nOrigin: chrome-extension://test\r\nOrigin: duplicate\r\n\r\n"));
     using var importClient = new HttpClient(new SocketsHttpHandler { UseProxy = false });
     using var sessionRequest = new HttpRequestMessage(
         HttpMethod.Get, $"http://127.0.0.1:{importServer.Port}/session");
@@ -79,7 +108,7 @@ await using (var importServer = BrowserCookieImportServer.Start())
         return 29;
     }
 }
-Console.WriteLine("PASS: one-time browser extension handoff works over the local-only channel.");
+Console.WriteLine("PASS: browser handoff survives stalled clients and duplicate headers on the local-only channel.");
 
 var ranking = NodeProbeRanking.Order(
 [
@@ -278,6 +307,32 @@ try
         return 41;
     }
 
+    foreach (var compatibility in new[] { false, true })
+    {
+        using var fixtureService = new GalleryDlService();
+        var completed = 0;
+        var skipped = 0;
+        var failed = 0;
+        fixtureService.FileCompleted += count => completed += count;
+        fixtureService.FileSkipped += count => skipped += count;
+        fixtureService.FileFailed += count => failed += count;
+        var result = await fixtureService.RunAsync(
+            Environment.ProcessPath!, resumeJob, CancellationToken.None, compatibility);
+        if (result != 1 || completed != 1 || skipped != 1 || failed != 1
+            || fixtureService.LastRunUsedImageAnchor == compatibility)
+        {
+            Console.Error.WriteLine($"FAIL: engine boundary: compatibility={compatibility}, exit={result}, completed={completed}, skipped={skipped}, failed={failed}, anchor={fixtureService.LastRunUsedImageAnchor}, process={Environment.ProcessPath}, error={fixtureService.LastRawError}");
+            return 42;
+        }
+    }
+    using (var cancelled = new CancellationTokenSource())
+    using (var cancelledService = new GalleryDlService())
+    {
+        cancelled.Cancel();
+        if (await cancelledService.RunAsync("must-not-start.exe", resumeJob, cancelled.Token) != -1)
+            return 43;
+    }
+
     File.WriteAllBytes(
         Path.Combine(resumeTestRoot, "4089450_0003_hash_image.png"),
         [1, 2, 3]);
@@ -336,6 +391,29 @@ finally
 }
 Console.WriteLine("PASS: fast resume starts at the first missing image without skipping gaps.");
 
+var progressFixturePath = Path.Combine(Path.GetTempPath(), $"eh-progress-{Guid.NewGuid():N}.log");
+try
+{
+    var expectedLine = "__GUI_SUCCESS__|3|5|中文图片.jpg";
+    var bytes = System.Text.Encoding.UTF8.GetBytes(expectedLine + "\n");
+    var split = System.Text.Encoding.UTF8.GetByteCount("__GUI_SUCCESS__|3|5|") + 1;
+    var reader = new ProgressFileReader();
+    File.WriteAllBytes(progressFixturePath, bytes[..split]);
+    if (reader.ReadAvailable(progressFixturePath).Count != 0) return 44;
+    using (var stream = new FileStream(progressFixturePath, FileMode.Append))
+        stream.Write(bytes[split..]);
+    if (reader.ReadAvailable(progressFixturePath).SingleOrDefault() != expectedLine
+        || reader.ReadAvailable(progressFixturePath).Count != 0) return 45;
+}
+finally { File.Delete(progressFixturePath); }
+Console.WriteLine("PASS: split UTF-8 progress records are delivered once, only when complete.");
+
+if (!CookieParser.CanSendTo(new Uri("https://exhentai.org/fullimg.php"))
+    || CookieParser.CanSendTo(new Uri("https://image.hath.network/file.jpg"))
+    || CookieParser.CanSendTo(new Uri("https://exhentai.org.example.com/"))
+    || CookieParser.CanSendTo(new Uri("http://exhentai.org/"))) return 46;
+Console.WriteLine("PASS: gallery login cookies are restricted to HTTPS gallery hosts.");
+
 const string fakeDigest =
     "a468359545129a1268ff3e2a59d2b453ff18a7306025a332a834f72eb328105e";
 var parsedAsset = ReleaseAssetParser.Parse(
@@ -344,6 +422,11 @@ var parsedAsset = ReleaseAssetParser.Parse(
     + "<a href=\"/gdl-org/builds/releases/download/2026.07.28/gallery-dl_windows.exe\">x64</a>"
     + $"<span>sha256:{fakeDigest}</span>",
     "2026.07.28");
+var adjacentDigestAsset = ReleaseAssetParser.Parse(
+    "<a href=\"/gdl-org/builds/releases/download/test/gallery-dl_windows.exe\">x64</a>"
+    + "<a href=\"/gdl-org/builds/releases/download/test/gallery-dl_windows_x86.exe\">x86</a>"
+    + $"<span>sha256:{fakeDigest}</span>", "test");
+if (adjacentDigestAsset.Sha256Digest is not null) return 47;
 if (!parsedAsset.DownloadUrl.EndsWith(
         "/gallery-dl_windows.exe", StringComparison.OrdinalIgnoreCase)
     || !string.Equals(parsedAsset.Sha256Digest, fakeDigest, StringComparison.OrdinalIgnoreCase))
@@ -410,10 +493,26 @@ try
         return 23;
     }
 Console.WriteLine("PASS: interrupted tasks persist safely without storing Cookies.");
+    persistedJob.State = "自动续传";
+    persistedJob.BlockedEngineVersion = "fixture-version";
+    persistedJob.Details = "保存下来的失败原因";
+    JobStore.SaveToPath(temporaryJobsPath, [persistedJob]);
+    var resumed = JobStore.LoadFromPath(temporaryJobsPath).Single();
+    if (resumed.State != "已停止" || resumed.BlockedEngineVersion != "fixture-version"
+        || resumed.AttemptStartedAt != persistedJob.AttemptStartedAt) return 48;
+    persistedJob.State = "失败";
+    JobStore.SaveToPath(temporaryJobsPath, [persistedJob]);
+    if (JobStore.LoadFromPath(temporaryJobsPath).Single().Details != persistedJob.Details) return 49;
+    JobStore.SaveToPath(temporaryJobsPath, Enumerable.Range(0, 205).Select(_ => persistedJob));
+    if (JobStore.LoadFromPath(temporaryJobsPath).Count != 205) return 50;
+    File.WriteAllText(temporaryJobsPath, "{truncated");
+    if (JobStore.LoadFromPath(temporaryJobsPath).Count != 1) return 51;
+    Console.WriteLine("PASS: retry state, errors and timing persist; damaged records recover from backup.");
 }
 finally
 {
     try { File.Delete(temporaryJobsPath); } catch { }
+    try { File.Delete(temporaryJobsPath + ".bak"); } catch { }
 }
 
 if (!GalleryDlOutputParser.TryParse(
