@@ -26,3 +26,17 @@ jobs:
 
       - name: Build
         run: dotnet build .\EhGalleryDownloader.sln -c Release --no-restore
+
+      - name: Run offline integration checks
+        run: dotnet run --project .\tests\EhGalleryDownloader.IntegrationProbe\EhGalleryDownloader.IntegrationProbe.csproj -c Release --no-build -- --unit-only
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Check browser extension syntax
+        run: node --check .\src\EhGalleryDownloader\BrowserExtension\popup.js
+
+      - name: Test browser extension
+        run: node --input-type=module -e "import('./tests/browser-extension/popup.test.mjs').then(async module => console.log((await module.runExtensionTests()).join('\n')))"

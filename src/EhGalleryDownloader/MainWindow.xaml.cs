@@ -221,6 +221,19 @@ public partial class MainWindow : Window
 
     private void OpenSettingsButton_Click(object sender, RoutedEventArgs e) => ShowPage(3);
 
+    private void OpenLoginSettingsButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (IsOperationBusy) return;
+        ShowPage(3);
+        SettingsTabControl.SelectedIndex = 2;
+        if (JobsGrid.SelectedItem is DownloadJob { RequiresLogin: true })
+        {
+            CookieStatusText.Foreground = (Brush)FindResource("WarningBrush");
+            CookieStatusText.Text = "请先在浏览器中确认能打开同一画廊，再点击上方“开始接收 Cookie”，按说明在浏览器扩展里发送；"
+                + "也可以粘贴新 Cookie 后点击“验证登录”。如果浏览器也打不开，请先检查账号访问权限。";
+        }
+    }
+
     private void ShowPage(int index)
     {
         if (MainNavigationTabControl is null) return;
@@ -253,7 +266,7 @@ public partial class MainWindow : Window
             1 => ("下载记录", "查看任务结果和保存位置"),
             2 => ("连接诊断", "检查代理、节点和画廊连接是否正常"),
             3 => ("设置", "管理下载偏好、连接方式与登录信息"),
-            _ => ("下载中心", "继续未完成的任务，或添加新的画廊")
+            _ => ("下载中心", "点击“新建下载” → 粘贴画廊链接 → 点击“开始下载”")
         };
     }
 
@@ -292,17 +305,20 @@ public partial class MainWindow : Window
             if (string.IsNullOrWhiteSpace(version))
             {
                 EngineDot.Fill = (Brush)FindResource("DangerBrush");
-                EngineStatusText.Text = "缺少下载内核";
-                InstallEngineButton.Content = "安装内核";
-                FooterStatusText.Text = "请点击右上角“安装内核”，软件会通过 Clash 下载 gallery-dl。";
+                EngineStatusText.Text = "下载组件未安装";
+                InstallEngineButton.Content = "安装组件";
+                FooterStatusText.Text = "请先点击右上角“安装组件”，安装完成后再添加漫画链接。";
             }
             else
             {
                 EngineDot.Fill = (Brush)FindResource("SuccessBrush");
-                EngineStatusText.Text = "下载内核已就绪";
-                EngineStatusText.ToolTip = $"gallery-dl {version}";
-                InstallEngineButton.Content = "检查更新";
-                if (!IsOperationBusy) FooterStatusText.Text = "选择待处理任务继续，或新建下载。";
+                EngineStatusText.Text = "下载组件已安装";
+                EngineStatusText.ToolTip = $"组件版本：gallery-dl {version}\n"
+                    + "漫画任务请点击“新建下载”，粘贴链接后点击“开始下载”。";
+                InstallEngineButton.Content = "更新组件";
+                if (!IsOperationBusy)
+                    FooterStatusText.Text = Jobs.FirstOrDefault(job => job.NeedsAttention)?.Details
+                        ?? "点击“新建下载”，粘贴画廊链接，再点击“开始下载”。";
             }
         }
         catch (Exception ex)
@@ -604,6 +620,11 @@ public partial class MainWindow : Window
     {
         if (IsOperationBusy
             || JobsGrid.SelectedItem is not DownloadJob selected) return;
+        if (selected.RequiresLogin)
+        {
+            OpenLoginSettingsButton_Click(sender, e);
+            return;
+        }
         var previousState = selected.State;
         BeginDownloadPreparation("正在准备继续下载…");
         selected.State = "准备中";
@@ -678,7 +699,7 @@ public partial class MainWindow : Window
         var engine = _engineManager.FindEngine();
         if (engine is null)
         {
-            MessageBox.Show("还没有安装 gallery-dl 下载内核。请先点右上角“安装 / 更新”。",
+            MessageBox.Show("还没有安装下载组件。请先点右上角“安装组件”，再开始下载漫画。",
                 "缺少内核", MessageBoxButton.OK, MessageBoxImage.Information);
             job.State = "失败";
             job.Details = "缺少 gallery-dl 下载内核。";
@@ -695,7 +716,7 @@ public partial class MainWindow : Window
                 MessageBox.Show(
                     $"这个任务上次已确认是下载内核兼容错误（KeyError i3）。\n\n"
                     + $"当前仍是同一个内核 {currentVersion}，继续点击只会立即失败。"
-                    + "\n请先点击右上角“检查更新”，更新成功后再继续。",
+                    + "\n请先点击右上角“更新组件”，更新成功后再继续。",
                     "需要先更新下载内核",
                     MessageBoxButton.OK,
                     MessageBoxImage.Information);
@@ -804,6 +825,14 @@ public partial class MainWindow : Window
                     FooterStatusText.Text = "下载完成。";
                     break;
                 }
+                if (DownloadErrorClassifier.IsAuthenticationFailure(_service.LastRawError))
+                {
+                    job.FinishedAt = DateTime.Now;
+                    job.State = "需要登录";
+                    job.Details = DownloadErrorClassifier.AuthenticationFailureMessage;
+                    FooterStatusText.Text = "网站拒绝访问此画廊，请点击任务上的“检查登录”。";
+                    break;
+                }
                 if (!compatibilityResume
                     && _service.LastRunUsedImageAnchor
                     && GalleryResumePlanner.IsImageAnchorUnavailable(_service.LastRawError))
@@ -847,11 +876,9 @@ public partial class MainWindow : Window
 
                 job.FinishedAt = DateTime.Now;
                 job.State = "失败";
-                if (!job.Details.Contains("失败") && !job.Details.Contains("错误"))
-                    job.Details =
-                        $"下载没有完整完成（内核返回代码 {exitCode}）。"
-                        + "可复制说明，或换节点后点“继续 / 补漏选中任务”。";
-                FooterStatusText.Text = "任务没有完整完成，可以换节点后重新尝试。";
+                job.Details = DownloadErrorClassifier.DescribeFailure(
+                    exitCode, _service.LastRawError, job.FailedFiles);
+                FooterStatusText.Text = "任务未完成，请按任务卡片中的具体原因处理后继续。";
                 break;
             }
         }
@@ -891,9 +918,17 @@ public partial class MainWindow : Window
     private async void ContinueAllButton_Click(object sender, RoutedEventArgs e)
     {
         if (IsOperationBusy) return;
-        var firstPending = Jobs.FirstOrDefault(job => job.State != "已完成");
+        var queue = Jobs.Where(job => job.State is not "已完成" and not "下载中"
+                                     && !job.RequiresLogin).ToList();
+        var firstPending = queue.FirstOrDefault();
         if (firstPending is null)
         {
+            if (Jobs.FirstOrDefault(job => job.RequiresLogin) is { } loginJob)
+            {
+                JobsGrid.SelectedItem = loginJob;
+                OpenLoginSettingsButton_Click(sender, e);
+                return;
+            }
             MessageBox.Show("没有需要继续的任务。", "队列为空",
                 MessageBoxButton.OK, MessageBoxImage.Information);
             return;
@@ -908,15 +943,13 @@ public partial class MainWindow : Window
                 MessageBox.Show(message, "无法继续队列", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
-            foreach (var job in Jobs.Where(job => job.State != "已完成"))
+            foreach (var job in queue)
             {
                 if (TryValidateInputs(job.Url, out message, job.OutputDirectory)) continue;
                 MessageBox.Show(message, "无法继续队列", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
             if (!ConfirmBrowserCookieAccess()) return;
-            var queue = Jobs.Where(job => job.State is not "已完成" and not "下载中")
-                .ToList();
             foreach (var job in queue)
             {
                 RefreshRetryOptions(job);
@@ -1134,6 +1167,7 @@ public partial class MainWindow : Window
         ImportBrowserCookieButton.IsEnabled = !busy && _browserImportCancellation is null;
         OpenExtensionSetupButton.IsEnabled = !busy && _browserImportCancellation is null;
         OpenNodeTestButton.IsEnabled = !busy;
+        OpenLoginSettingsButton.IsEnabled = !busy;
         AutoFailoverModeComboBox.IsEnabled = !busy;
         ActivityProgressBar.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
         ActivityProgressBar.IsIndeterminate = running || _isPreparingResume || _isPreparingNodeTest;
@@ -1367,13 +1401,32 @@ public partial class MainWindow : Window
         OpenExtensionSetupButton.IsEnabled = false;
         CookieStatusText.Foreground = (Brush)FindResource("WarningBrush");
         CookieStatusText.Text =
-            "正在等待浏览器…请切换到已登录的画廊网页，点击工具栏中的“画廊登录导入”扩展。";
+            "等待扩展发送。请切换到已登录的画廊网页，点击工具栏的“画廊登录导入”，再点“发送到下载助手”。";
+        DispatcherTimer? countdown = null;
 
         try
         {
             await using var server = BrowserCookieImportServer.Start();
+            var deadline = DateTimeOffset.UtcNow.Add(BrowserCookieImportServer.ImportTimeout);
+            var pendingStatus = "尚未连接扩展：请在浏览器工具栏打开“画廊登录导入”，点击“发送到下载助手”";
+            void RefreshImportStatus()
+            {
+                var remaining = deadline - DateTimeOffset.UtcNow;
+                if (remaining < TimeSpan.Zero) remaining = TimeSpan.Zero;
+                BrowserImportStatusText.Text = $"{pendingStatus}（剩余 {remaining:mm\\:ss}）";
+            }
+            server.StatusChanged += message => RunOnUi(() =>
+            {
+                pendingStatus = message;
+                RefreshImportStatus();
+            });
+            countdown = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+            countdown.Tick += (_, _) => RefreshImportStatus();
+            RefreshImportStatus();
+            countdown.Start();
             var imported = await server.WaitForImportAsync(
-                TimeSpan.FromMinutes(2), _browserImportCancellation.Token);
+                BrowserCookieImportServer.ImportTimeout, _browserImportCancellation.Token);
+            countdown.Stop();
 
             SelectComboByTag(LoginModeComboBox, "manual");
             _syncingCookieInputs = true;
@@ -1382,96 +1435,40 @@ public partial class MainWindow : Window
             _syncingCookieInputs = false;
             UpdateLoginModeUi();
             CookieStatusText.Text = $"已从 {imported.Browser} 收到登录状态，正在验证…";
+            BrowserImportStatusText.Text = CookieStatusText.Text;
             await VerifyAndStoreCookieAsync(imported.CookieHeader, imported.Browser);
+            BrowserImportStatusText.Text = "已接收，验证结果：" + CookieStatusText.Text;
         }
         catch (OperationCanceledException)
         {
             CookieStatusText.Foreground = (Brush)FindResource("SubTextBrush");
             CookieStatusText.Text = "已取消等待浏览器导入。";
+            BrowserImportStatusText.Text = "已取消。下次点击“开始接收 Cookie”后，再到浏览器扩展发送。";
         }
         catch (TimeoutException ex)
         {
             CookieStatusText.Foreground = (Brush)FindResource("WarningBrush");
             CookieStatusText.Text = ex.Message;
+            BrowserImportStatusText.Text = ex.Message;
         }
         catch (Exception ex)
         {
             CookieStatusText.Foreground = (Brush)FindResource("DangerBrush");
             CookieStatusText.Text = FriendlyError(ex.Message);
+            BrowserImportStatusText.Text = CookieStatusText.Text;
         }
         finally
         {
+            countdown?.Stop();
             _browserImportCancellation.Dispose();
             _browserImportCancellation = null;
-            ImportBrowserCookieButton.Content = "从当前网页导入";
+            ImportBrowserCookieButton.Content = "开始接收 Cookie";
             OpenExtensionSetupButton.IsEnabled = true;
         }
     }
 
-    private void OpenExtensionSetupButton_Click(object sender, RoutedEventArgs e)
-    {
-        var extensionDirectory = Path.Combine(AppContext.BaseDirectory, "BrowserExtension");
-        if (!Directory.Exists(extensionDirectory))
-        {
-            MessageBox.Show(
-                "当前程序目录中缺少 BrowserExtension 文件夹，请重新解压完整安装包。",
-                "没有找到扩展文件",
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
-            return;
-        }
-
-        Process.Start(new ProcessStartInfo
-        {
-            FileName = extensionDirectory,
-            UseShellExecute = true
-        });
-        OpenInstalledBrowserExtensionsPage();
-        MessageBox.Show(
-            "已打开扩展文件夹和浏览器扩展页面。\n\n" +
-            "开启“开发者模式” → “加载已解压的扩展程序” → 选择刚打开的 BrowserExtension 文件夹。\n" +
-            "Edge 用户请在地址栏打开 edge://extensions/，操作相同。",
-            "首次安装扩展",
-            MessageBoxButton.OK,
-            MessageBoxImage.Information);
-    }
-
-    private static void OpenInstalledBrowserExtensionsPage()
-    {
-        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
-        var programFilesX86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
-        var chromeCandidates = new[]
-        {
-            Path.Combine(programFiles, "Google", "Chrome", "Application", "chrome.exe"),
-            Path.Combine(programFilesX86, "Google", "Chrome", "Application", "chrome.exe"),
-            Path.Combine(localAppData, "Google", "Chrome", "Application", "chrome.exe")
-        };
-        var edgeCandidates = new[]
-        {
-            Path.Combine(programFilesX86, "Microsoft", "Edge", "Application", "msedge.exe"),
-            Path.Combine(programFiles, "Microsoft", "Edge", "Application", "msedge.exe")
-        };
-
-        var chromeProcesses = Process.GetProcessesByName("chrome");
-        var chromeRunning = chromeProcesses.Length > 0;
-        foreach (var process in chromeProcesses) process.Dispose();
-        var ordered = chromeRunning
-            ? chromeCandidates.Select(path => (path, "chrome://extensions/"))
-                .Concat(edgeCandidates.Select(path => (path, "edge://extensions/")))
-            : edgeCandidates.Select(path => (path, "edge://extensions/"))
-                .Concat(chromeCandidates.Select(path => (path, "chrome://extensions/")));
-        var selected = ordered.FirstOrDefault(item => File.Exists(item.path));
-        if (!string.IsNullOrWhiteSpace(selected.path))
-        {
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = selected.path,
-                Arguments = selected.Item2,
-                UseShellExecute = true
-            });
-        }
-    }
+    private void OpenExtensionSetupButton_Click(object sender, RoutedEventArgs e) =>
+        ImportBrowserCookieButton_Click(sender, e);
 
     private async Task<bool> VerifyAndStoreCookieAsync(string cookie, string sourceLabel)
     {
@@ -1491,24 +1488,33 @@ public partial class MainWindow : Window
             var proxy = UseProxyCheckBox.IsChecked == true ? NormalizeProxy(ProxyTextBox.Text) : null;
             var result = await CookieVerificationService.VerifyAsync(
                 cookie, proxy, _cookieVerificationCancellation.Token);
-            CookieStatusText.Foreground = result.EhentaiValid
+            CookieStatusText.Foreground = result.ExhentaiValid
                 ? (Brush)FindResource("SuccessBrush")
-                : (Brush)FindResource("DangerBrush");
+                : (Brush)FindResource(result.EhentaiValid ? "WarningBrush" : "DangerBrush");
             CookieStatusText.Text = result.Message;
 
             if (!result.EhentaiValid) return false;
 
             _verifiedManualCookie = cookie.Trim();
             _settings.LastCookieVerifiedAt = DateTime.Now;
+            SelectComboByTag(LoginModeComboBox, "manual");
             if (RememberCookieCheckBox.IsChecked == true)
             {
                 CookiePersistence.SaveIfEnabled(cookie, enabled: true);
                 _settings.RememberCookie = true;
                 _settings.CookieStoragePreferenceSet = true;
-                FooterStatusText.Text =
-                    $"已从{sourceLabel}导入并验证，登录状态已使用 Windows 当前账户加密保存。";
             }
-            SettingsStore.Save(_settings);
+            foreach (var job in Jobs.Where(job => job.RequiresLogin && result.CanAccess(job.Url)))
+            {
+                job.State = "已停止";
+                job.Details = "登录验证已通过。返回下载中心点击“继续下载”，已有图片会保留。"
+                    + "若这个画廊仍拒绝访问，请在浏览器中确认账号有权查看它。";
+            }
+            FooterStatusText.Text = result.ExhentaiValid
+                ? "登录验证已通过。返回下载中心点击“继续下载”或新建漫画任务。"
+                : result.Message;
+            SaveSettings();
+            SaveJobs();
             return true;
         }
         catch (OperationCanceledException)

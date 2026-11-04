@@ -1,0 +1,60 @@
+<!-- Editable vector master. Run scripts/Build-Icons.ps1 to regenerate application
+     and browser icons. Geometry uses a 256 by 256 canvas, with transparent edges. -->
+<DrawingImage xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation">
+    <DrawingImage.Drawing>
+        <DrawingGroup>
+            <GeometryDrawing Brush="Transparent" Geometry="M0,0 H256 V256 H0 Z"/>
+            <GeometryDrawing>
+                <GeometryDrawing.Brush>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                        <GradientStop Color="#2586F6" Offset="0"/>
+                        <GradientStop Color="#3D63E8" Offset="0.55"/>
+                        <GradientStop Color="#5146CC" Offset="1"/>
+                    </LinearGradientBrush>
+                </GeometryDrawing.Brush>
+                <GeometryDrawing.Geometry>
+                    <RectangleGeometry Rect="8,8,240,240" RadiusX="54" RadiusY="54"/>
+                </GeometryDrawing.Geometry>
+            </GeometryDrawing>
+            <DrawingGroup>
+                <DrawingGroup.Transform>
+                    <RotateTransform Angle="9" CenterX="137" CenterY="118"/>
+                </DrawingGroup.Transform>
+                <GeometryDrawing Brush="#A5CFFF">
+                    <GeometryDrawing.Geometry>
+                        <RectangleGeometry Rect="65,46,132,141" RadiusX="17" RadiusY="17"/>
+                    </GeometryDrawing.Geometry>
+                </GeometryDrawing>
+            </DrawingGroup>
+            <GeometryDrawing Brush="#FFFFFF">
+                <GeometryDrawing.Geometry>
+                    <RectangleGeometry Rect="44,65,139,140" RadiusX="19" RadiusY="19"/>
+                </GeometryDrawing.Geometry>
+            </GeometryDrawing>
+            <GeometryDrawing Brush="#E4EFFF">
+                <GeometryDrawing.Geometry>
+                    <RectangleGeometry Rect="58,79,111,92" RadiusX="8" RadiusY="8"/>
+                </GeometryDrawing.Geometry>
+            </GeometryDrawing>
+            <GeometryDrawing Brush="#40BEE7">
+                <GeometryDrawing.Geometry>
+                    <EllipseGeometry Center="141,103" RadiusX="12" RadiusY="12"/>
+                </GeometryDrawing.Geometry>
+            </GeometryDrawing>
+            <GeometryDrawing Brush="#3775E8"
+                             Geometry="M58,150 L91,111 Q94,107 98,112 L125,145 L140,130 Q144,126 148,131 L169,154 V163 Q169,171 161,171 H66 Q58,171 58,163 Z"/>
+            <GeometryDrawing Brush="#B7CCF7">
+                <GeometryDrawing.Geometry>
+                    <RectangleGeometry Rect="60,183,63,8" RadiusX="4" RadiusY="4"/>
+                </GeometryDrawing.Geometry>
+            </GeometryDrawing>
+            <GeometryDrawing Brush="#344FD0">
+                <GeometryDrawing.Geometry>
+                    <EllipseGeometry Center="183,181" RadiusX="44" RadiusY="44"/>
+                </GeometryDrawing.Geometry>
+            </GeometryDrawing>
+            <GeometryDrawing Brush="#A4FFE6"
+                             Geometry="M177,151 Q177,148 180,148 H187 Q190,148 190,151 V181 L202,169 Q204,167 206,169 L211,174 Q213,176 211,178 L187,202 Q183,206 179,202 L155,178 Q153,176 155,174 L160,169 Q162,167 164,169 L177,182 Z"/>
+        </DrawingGroup>
+    </DrawingImage.Drawing>
+</DrawingImage>

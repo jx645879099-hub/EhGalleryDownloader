@@ -130,6 +130,8 @@ public static class GallerySampleService
 
     private static string ToFriendlyExtractorError(string stderr)
     {
+        if (DownloadErrorClassifier.IsAuthenticationFailure(stderr))
+            return DownloadErrorClassifier.AuthenticationFailureMessage;
         if (stderr.Contains("KeyError - 'i3'", StringComparison.OrdinalIgnoreCase))
             return "当前下载内核出现兼容错误（KeyError i3），无法取得测速图片。请先更新内核；这不是 Clash 端口故障。";
         if (stderr.Contains("UNEXPECTED_EOF", StringComparison.OrdinalIgnoreCase)
@@ -138,8 +140,6 @@ public static class GallerySampleService
             return "当前节点连接画廊图片服务器时被中途断开。Clash 本身正在运行，但这条节点到 H@H 图片服务器不稳定。";
         if (stderr.Contains("timeout", StringComparison.OrdinalIgnoreCase))
             return "读取画廊信息超时。Clash 本身可能正常，但当前节点到画廊服务器的线路较慢。";
-        if (stderr.Contains("AuthenticationError", StringComparison.OrdinalIgnoreCase))
-            return "当前 Cookie 无法读取这个画廊，请重新验证登录。";
         if (stderr.Contains("cookies", StringComparison.OrdinalIgnoreCase))
             return "读取浏览器登录信息失败。可以改用手动粘贴 Cookie。";
         if (stderr.Contains("unsupported URL", StringComparison.OrdinalIgnoreCase))

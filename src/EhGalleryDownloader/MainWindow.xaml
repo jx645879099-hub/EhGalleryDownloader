@@ -93,10 +93,8 @@
                         <ColumnDefinition Width="42"/>
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
-                    <Border Width="38" Height="38" Background="#4C75EF" CornerRadius="10">
-                        <TextBlock Text="廊" Foreground="White" FontWeight="Bold" FontSize="18"
-                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                    </Border>
+                    <Image Source="Assets/AppIcon.png" Width="38" Height="38"
+                           AutomationProperties.Name="画廊下载助手图标"/>
                     <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="8,0,0,0">
                         <TextBlock Text="画廊下载" Foreground="#101828" FontWeight="SemiBold" FontSize="{DynamicResource FontNavSize}"/>
                         <TextBlock Text="本地下载助手" Foreground="#667085" FontSize="{DynamicResource FontCaptionSize}" Margin="0,2,0,0"/>
@@ -151,10 +149,10 @@
                         <Border Background="White" BorderBrush="#DDE4EE" BorderThickness="1" CornerRadius="17" Padding="11,7">
                             <StackPanel Orientation="Horizontal">
                                 <Ellipse x:Name="EngineDot" Width="8" Height="8" Fill="{StaticResource WarningBrush}" Margin="0,0,7,0"/>
-                                <TextBlock x:Name="EngineStatusText" Text="正在检查内核…" FontSize="{DynamicResource FontCaptionSize}" FontWeight="SemiBold"/>
+                                <TextBlock x:Name="EngineStatusText" Text="正在检查下载组件…" FontSize="{DynamicResource FontCaptionSize}" FontWeight="SemiBold"/>
                             </StackPanel>
                         </Border>
-                        <Button x:Name="InstallEngineButton" Content="检查内核" Margin="8,0,0,0" Padding="10,5"
+                        <Button x:Name="InstallEngineButton" Content="更新组件" Margin="8,0,0,0" Padding="10,5"
                                 MinHeight="32" Click="InstallEngineButton_Click"/>
                         <Button x:Name="AppUpdateButton" Content="软件更新" Margin="8,0,0,0" Padding="10,5"
                                 MinHeight="32" Click="AppUpdateButton_Click"/>
@@ -194,7 +192,7 @@
                                         </Border>
                                         <StackPanel>
                                             <TextBlock Text="要下载哪个画廊？" FontSize="{DynamicResource FontCardTitleSize}" FontWeight="SemiBold"/>
-                                            <TextBlock Text="支持 E-Hentai 和 ExHentai；多个链接请每行填写一个"
+                                            <TextBlock Text="粘贴画廊首页链接后点击“开始下载”；多个链接请每行填写一个"
                                                        Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Margin="0,5,0,0"/>
                                         </StackPanel>
                                     </StackPanel>
@@ -226,6 +224,8 @@
                                                    FontWeight="SemiBold" Foreground="#536075" FontSize="{DynamicResource FontCaptionSize}" Margin="9,0,0,0"/>
                                         <Button Content="修改设置" BorderThickness="0" Background="Transparent" Foreground="#4167D6"
                                                 Padding="8,2" MinHeight="24" Click="OpenSettingsButton_Click"/>
+                                        <Button x:Name="OpenLoginSettingsButton" Content="检查登录" BorderThickness="0" Background="Transparent"
+                                                Foreground="#4167D6" Padding="8,2" MinHeight="24" Click="OpenLoginSettingsButton_Click"/>
                                         <Button x:Name="OpenNodeTestButton" Content="节点测速" BorderThickness="0" Background="Transparent"
                                                 Foreground="#4167D6" Padding="8,2" MinHeight="24" Click="OpenNodeTestButton_Click"/>
                                     </StackPanel>
@@ -522,19 +522,23 @@
                         </TabItem>
                         <TabItem Header="ExHentai 登录">
                             <Border Style="{StaticResource CardStyle}">
+                              <ScrollViewer VerticalScrollBarVisibility="Auto">
                                 <StackPanel>
                                     <StackPanel Margin="25,23,25,17"><TextBlock Text="ExHentai 登录" FontSize="{DynamicResource FontCardTitleSize}" FontWeight="SemiBold"/><TextBlock Text="可以自动导入，也可以手动填写；两种方式都只保存在这台电脑上" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Margin="0,5,0,0"/></StackPanel>
                                     <Border Margin="25,0,25,5" Padding="18" Background="#F0F6FF" CornerRadius="12" BorderBrush="#D9E7FF" BorderThickness="1">
                                         <Grid>
+                                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                                             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                             <StackPanel>
-                                                <TextBlock Text="方式一：从正在打开的网页导入" FontSize="{DynamicResource FontNavSize}" FontWeight="SemiBold"/>
-                                                <TextBlock Text="适合忘记密码或长期保持网页登录的用户；只读取三项必要登录 Cookie" Foreground="#526B91" FontSize="{DynamicResource FontCaptionSize}" Margin="0,5,0,0"/>
+                                                <TextBlock Text="方式一：通过浏览器扩展导入" FontSize="{DynamicResource FontNavSize}" FontWeight="SemiBold"/>
+                                                <TextBlock Text="网页登录后，还要在配套扩展里点击发送" Foreground="#526B91" FontSize="{DynamicResource FontCaptionSize}" Margin="0,5,0,0" TextWrapping="Wrap"/>
                                             </StackPanel>
-                                            <Button x:Name="OpenExtensionSetupButton" Grid.Column="1" Content="首次安装扩展" Margin="12,0,9,0"
+                                            <Button x:Name="OpenExtensionSetupButton" Grid.Column="1" Content="安装 / 使用说明" Margin="12,0,9,0"
                                                     Style="{StaticResource GhostButton}" Click="OpenExtensionSetupButton_Click"/>
-                                            <Button x:Name="ImportBrowserCookieButton" Grid.Column="2" Content="从当前网页导入"
+                                            <Button x:Name="ImportBrowserCookieButton" Grid.Column="2" Content="开始接收 Cookie"
                                                     Style="{StaticResource PrimaryButton}" Click="ImportBrowserCookieButton_Click"/>
+                                            <TextBlock Grid.Row="1" Grid.ColumnSpan="3" Margin="0,13,0,0" Text="① 首次安装“画廊登录导入”扩展 → ② 在本软件开始接收 → ③ 在已登录的画廊网页打开扩展，点击“发送到下载助手”" TextWrapping="Wrap" Foreground="#2B579A"/>
+                                            <TextBlock x:Name="BrowserImportStatusText" Grid.Row="2" Grid.ColumnSpan="3" Margin="0,9,0,0" Text="尚未开始。只在网页登录不会自动导入；不确定是否安装时，请先看“安装 / 使用说明”。" TextWrapping="Wrap" FontSize="{DynamicResource FontCaptionSize}" Foreground="#526B91"/>
                                         </Grid>
                                     </Border>
                                     <Border Style="{StaticResource SettingRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="320"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="下载时使用的登录方式" FontWeight="SemiBold"/><TextBlock Text="自动导入和手动填写最终都会安全转换为可验证的登录状态" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Margin="0,4,0,0"/></StackPanel><ComboBox x:Name="LoginModeComboBox" Grid.Column="1" SelectionChanged="LoginModeComboBox_SelectionChanged"><ComboBoxItem Content="使用已导入或手动填写的 Cookie（推荐）" Tag="manual"/><ComboBoxItem Content="尝试从本机 Edge 资料读取" Tag="edge"/><ComboBoxItem Content="尝试从本机 Chrome 资料读取" Tag="chrome"/><ComboBoxItem Content="尝试从本机 Firefox 资料读取" Tag="firefox"/><ComboBoxItem Content="不登录（仅公开画廊）" Tag="none"/></ComboBox></Grid></Border>
@@ -549,13 +553,14 @@
                                         </Grid>
                                     </Border>
                                 </StackPanel>
+                              </ScrollViewer>
                             </Border>
                         </TabItem>
                         <TabItem Header="软件与更新">
                             <Border Style="{StaticResource CardStyle}">
                                 <StackPanel>
                                     <StackPanel Margin="24,22,24,15"><TextBlock Text="软件与更新" FontSize="{DynamicResource FontCardTitleSize}" FontWeight="SemiBold"/><TextBlock x:Name="SettingsVersionText" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Margin="0,5,0,0"/></StackPanel>
-                                    <Border Style="{StaticResource SettingRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="下载内核" FontWeight="SemiBold"/><TextBlock Text="检查 gallery-dl 内核是否需要更新" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Margin="0,4,0,0"/></StackPanel><Button x:Name="SettingsEngineUpdateButton" Grid.Column="1" Content="检查内核更新" Click="InstallEngineButton_Click"/></Grid></Border>
+                                    <Border Style="{StaticResource SettingRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="下载组件" FontWeight="SemiBold"/><TextBlock Text="组件负责获取图片；下载漫画请返回下载中心添加链接" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Margin="0,4,0,0"/></StackPanel><Button x:Name="SettingsEngineUpdateButton" Grid.Column="1" Content="检查组件更新" Click="InstallEngineButton_Click"/></Grid></Border>
                                     <Border Style="{StaticResource SettingRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="软件更新" FontWeight="SemiBold"/><TextBlock Text="从 GitHub Release 检查新版本" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Margin="0,4,0,0"/></StackPanel><Button Grid.Column="1" Content="检查软件更新" Click="AppUpdateButton_Click"/></Grid></Border>
                                 </StackPanel>
                             </Border>

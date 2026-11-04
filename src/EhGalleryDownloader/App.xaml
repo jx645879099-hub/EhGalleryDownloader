@@ -24,6 +24,7 @@
         <SolidColorBrush x:Key="DisabledBrush" Color="#EEF2F7"/>
 
         <Style TargetType="Window">
+            <Setter Property="Icon" Value="pack://application:,,,/Assets/AppIcon.ico"/>
             <Setter Property="Background" Value="{StaticResource WindowBrush}"/>
             <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
             <Setter Property="FontFamily" Value="Microsoft YaHei UI"/>
@@ -339,6 +340,10 @@
                     <Setter Property="Background" Value="#ECFDF5"/>
                 </DataTrigger>
                 <DataTrigger Binding="{Binding State}" Value="失败">
+                    <Setter Property="Background" Value="#FFF1F2"/>
+                    <Setter Property="Foreground" Value="#8F1830"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding State}" Value="需要登录">
                     <Setter Property="Background" Value="#FFF1F2"/>
                     <Setter Property="Foreground" Value="#8F1830"/>
                 </DataTrigger>

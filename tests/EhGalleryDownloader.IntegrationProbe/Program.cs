@@ -7,6 +7,14 @@ if (args.Contains("--config-ignore"))
 {
     Console.OutputEncoding = new System.Text.UTF8Encoding(false);
     var input = args[^1];
+    if (input == "https://exhentai.org/g/99999/auth-fixture/")
+    {
+        Console.Error.WriteLine("[exhentai][info] blank page");
+        Console.Error.WriteLine(
+            "[exhentai][error] AuthorizationError: Insufficient privileges to access this resource");
+        Console.Error.WriteLine("[exhentai][info] extractor stopped");
+        return 16;
+    }
     var direct = input == "https://exhentai.org/s/abcdef1234/4089450-2";
     var rangeIndex = Array.IndexOf(args, "--range");
     if (direct ? rangeIndex >= 0 : rangeIndex < 0 || args[rangeIndex + 1] != "3-") return 92;
@@ -66,8 +74,48 @@ if (!BrowserCookieImportServer.TryCreateCookieHeader(
 }
 Console.WriteLine("PASS: browser import only accepts the three required cookies from gallery domains.");
 
+var separateAccounts = browserPayload with
+{
+    Cookies =
+    [
+        new BrowserCookieItem("ipb_member_id", "ex-user", ".exhentai.org"),
+        new BrowserCookieItem("ipb_pass_hash", "ex-hash", ".exhentai.org"),
+        new BrowserCookieItem("igneous", "ex-token", ".exhentai.org"),
+        new BrowserCookieItem("ipb_member_id", "eh-user", ".e-hentai.org"),
+        new BrowserCookieItem("ipb_pass_hash", "eh-hash", ".e-hentai.org")
+    ]
+};
+if (!BrowserCookieImportServer.TryCreateCookieHeader(separateAccounts, out var exHeader, out _)
+    || !exHeader.Contains("ipb_member_id=ex-user", StringComparison.Ordinal)
+    || exHeader.Contains("eh-hash", StringComparison.Ordinal)
+    || !BrowserCookieImportServer.TryCreateCookieHeader(
+        separateAccounts with { PageUrl = "https://e-hentai.org/", Cookies = separateAccounts.Cookies.Reverse().ToList() },
+        out var ehHeader, out _)
+    || !ehHeader.Contains("ipb_member_id=eh-user", StringComparison.Ordinal)
+    || ehHeader.Contains("ex-hash", StringComparison.Ordinal)) return 58;
+var mixedAccount = browserPayload with
+{
+    Cookies =
+    [
+        new BrowserCookieItem("ipb_member_id", "eh-user", ".e-hentai.org"),
+        new BrowserCookieItem("ipb_pass_hash", "ex-hash", ".exhentai.org"),
+        new BrowserCookieItem("igneous", "ex-token", ".exhentai.org")
+    ]
+};
+if (BrowserCookieImportServer.TryCreateCookieHeader(mixedAccount, out _, out _)
+    || BrowserCookieImportServer.TryCreateCookieHeader(
+        browserPayload with { PageUrl = "https://example.com/" }, out _, out _)
+    || BrowserCookieImportServer.TryCreateCookieHeader(
+        browserPayload with { Cookies = browserPayload.Cookies.Where(cookie => cookie.Name != "igneous").ToList() },
+        out _, out var missingIgneousError)
+    || !missingIgneousError.Contains("igneous", StringComparison.Ordinal)) return 59;
+Console.WriteLine("PASS: browser import keeps site accounts paired and explains missing ExHentai access cookies.");
+
 await using (var importServer = BrowserCookieImportServer.Start())
 {
+    var importStatuses = new System.Collections.Concurrent.ConcurrentQueue<string>();
+    importServer.StatusChanged += importStatuses.Enqueue;
+    var importWatch = Stopwatch.StartNew();
     var waitForImport = importServer.WaitForImportAsync(TimeSpan.FromSeconds(15));
     // A stalled preconnection and duplicate headers must not kill the import session.
     using var stalledClient = new System.Net.Sockets.TcpClient();
@@ -80,12 +128,89 @@ await using (var importServer = BrowserCookieImportServer.Start())
     using var importClient = new HttpClient(new SocketsHttpHandler { UseProxy = false });
     using var sessionRequest = new HttpRequestMessage(
         HttpMethod.Get, $"http://127.0.0.1:{importServer.Port}/session");
-    sessionRequest.Headers.TryAddWithoutValidation("Origin", "chrome-extension://unit-test");
+    // Host-permitted extension fetches may omit Origin. Do not invent it in the fixture.
     sessionRequest.Headers.TryAddWithoutValidation("X-EhGallery-Extension", "1");
     using var sessionResponse = await importClient.SendAsync(sessionRequest);
+    if (!sessionResponse.IsSuccessStatusCode)
+    {
+        Console.Error.WriteLine($"FAIL: originless extension discovery was rejected with HTTP {(int)sessionResponse.StatusCode}.");
+        return 63;
+    }
     using var sessionJson = System.Text.Json.JsonDocument.Parse(
         await sessionResponse.Content.ReadAsStringAsync());
     var sessionToken = sessionJson.RootElement.GetProperty("token").GetString();
+    if (sessionJson.RootElement.GetProperty("expiresInSeconds").GetInt32() is not (> 0 and <= 15)) return 60;
+
+    foreach (var origin in new[] { "", "https://example.com", "null" })
+    {
+        using var forbiddenSession = new HttpRequestMessage(
+            HttpMethod.Get, $"http://127.0.0.1:{importServer.Port}/session");
+        if (origin.Length > 0)
+        {
+            forbiddenSession.Headers.TryAddWithoutValidation("Origin", origin);
+            forbiddenSession.Headers.TryAddWithoutValidation("X-EhGallery-Extension", "1");
+        }
+        using var forbiddenResponse = await importClient.SendAsync(forbiddenSession);
+        if ((int)forbiddenResponse.StatusCode != 403
+            || forbiddenResponse.Headers.Contains("Access-Control-Allow-Origin")
+            || (await forbiddenResponse.Content.ReadAsStringAsync()).Contains(sessionToken!, StringComparison.Ordinal))
+            return 64;
+    }
+    foreach (var origin in new[] { "chrome-extension://unit-test", "https://example.com", "" })
+    {
+        using var preflight = new HttpRequestMessage(
+            HttpMethod.Options, $"http://127.0.0.1:{importServer.Port}/import");
+        if (origin.Length > 0) preflight.Headers.TryAddWithoutValidation("Origin", origin);
+        preflight.Headers.TryAddWithoutValidation("Access-Control-Request-Method", "POST");
+        preflight.Headers.TryAddWithoutValidation("Access-Control-Request-Headers", "content-type,x-ehgallery-extension");
+        using var preflightResponse = await importClient.SendAsync(preflight);
+        var allowed = origin.StartsWith("chrome-extension://", StringComparison.Ordinal);
+        if ((int)preflightResponse.StatusCode != (allowed ? 204 : 403)
+            || preflightResponse.Headers.Contains("Access-Control-Allow-Origin") != allowed) return 65;
+    }
+    using var reboundHostRequest = new HttpRequestMessage(
+        HttpMethod.Get, $"http://127.0.0.1:{importServer.Port}/session");
+    reboundHostRequest.Headers.Host = $"example.com:{importServer.Port}";
+    reboundHostRequest.Headers.TryAddWithoutValidation("X-EhGallery-Extension", "1");
+    using var reboundHostResponse = await importClient.SendAsync(reboundHostRequest);
+    if ((int)reboundHostResponse.StatusCode != 403) return 68;
+    using var explicitOriginSession = new HttpRequestMessage(
+        HttpMethod.Get, $"http://127.0.0.1:{importServer.Port}/session");
+    explicitOriginSession.Headers.TryAddWithoutValidation("Origin", "chrome-extension://unit-test");
+    explicitOriginSession.Headers.TryAddWithoutValidation("X-EhGallery-Extension", "1");
+    using var explicitOriginResponse = await importClient.SendAsync(explicitOriginSession);
+    if (!explicitOriginResponse.IsSuccessStatusCode
+        || !explicitOriginResponse.Headers.GetValues("Access-Control-Allow-Origin").Contains("chrome-extension://unit-test"))
+        return 66;
+
+    foreach (var attempt in new[]
+    {
+        (Origin: "", Marker: true, Token: "wrong-token"),
+        (Origin: "", Marker: false, Token: sessionToken!),
+        (Origin: "https://example.com", Marker: true, Token: sessionToken!)
+    })
+    {
+        using var forbiddenImport = new HttpRequestMessage(
+            HttpMethod.Post, $"http://127.0.0.1:{importServer.Port}/import")
+        {
+            Content = new StringContent(System.Text.Json.JsonSerializer.Serialize(browserPayload with
+                { Token = attempt.Token }), System.Text.Encoding.UTF8, "application/json")
+        };
+        if (attempt.Origin.Length > 0) forbiddenImport.Headers.TryAddWithoutValidation("Origin", attempt.Origin);
+        if (attempt.Marker) forbiddenImport.Headers.TryAddWithoutValidation("X-EhGallery-Extension", "1");
+        using var forbiddenImportResponse = await importClient.SendAsync(forbiddenImport);
+        if ((int)forbiddenImportResponse.StatusCode != 403 || waitForImport.IsCompleted) return 67;
+    }
+    using var rejectedRequest = new HttpRequestMessage(
+        HttpMethod.Post, $"http://127.0.0.1:{importServer.Port}/import")
+    {
+        Content = new StringContent(System.Text.Json.JsonSerializer.Serialize(mixedAccount with
+            { Token = sessionToken ?? "" }), System.Text.Encoding.UTF8, "application/json")
+    };
+    rejectedRequest.Headers.TryAddWithoutValidation("Origin", "chrome-extension://unit-test");
+    rejectedRequest.Headers.TryAddWithoutValidation("X-EhGallery-Extension", "1");
+    using var rejectedResponse = await importClient.SendAsync(rejectedRequest);
+    if ((int)rejectedResponse.StatusCode != 422 || waitForImport.IsCompleted) return 61;
     var postPayload = System.Text.Json.JsonSerializer.Serialize(browserPayload with
     {
         Token = sessionToken ?? ""
@@ -95,7 +220,6 @@ await using (var importServer = BrowserCookieImportServer.Start())
     {
         Content = new StringContent(postPayload, System.Text.Encoding.UTF8, "application/json")
     };
-    postRequest.Headers.TryAddWithoutValidation("Origin", "chrome-extension://unit-test");
     postRequest.Headers.TryAddWithoutValidation("X-EhGallery-Extension", "1");
     using var postResponse = await importClient.SendAsync(postRequest);
     var receivedImport = await waitForImport;
@@ -107,8 +231,12 @@ await using (var importServer = BrowserCookieImportServer.Start())
         Console.Error.WriteLine("FAIL: browser extension loopback handoff did not complete safely.");
         return 29;
     }
+    if (!importStatuses.Any(status => status.Contains("已连接", StringComparison.Ordinal))
+        || !importStatuses.Any(status => status.Contains("未通过检查", StringComparison.Ordinal))
+        || importWatch.Elapsed > TimeSpan.FromSeconds(3)) return 62;
 }
-Console.WriteLine("PASS: browser handoff survives stalled clients and duplicate headers on the local-only channel.");
+Console.WriteLine("PASS: browser handoff reports rejected cookies, allows retry, and handles stalled clients concurrently.");
+Console.WriteLine("PASS: originless extension discovery and import work; website origins, rebound hosts, missing markers and invalid tokens remain blocked.");
 
 var ranking = NodeProbeRanking.Order(
 [
@@ -467,6 +595,67 @@ if (!DownloadErrorClassifier.IsTransient("SSL unexpected EOF while reading")
 }
 Console.WriteLine("PASS: transient network failures are separated from permanent errors.");
 
+const string authorizationError =
+    "[exhentai][error] AuthorizationError: Insufficient privileges to access this resource";
+if (!DownloadErrorClassifier.IsAuthenticationFailure(authorizationError)
+    || DownloadErrorClassifier.IsTransient(authorizationError + " (connection closed)")
+    || DownloadErrorClassifier.DescribeFailure(16, authorizationError, 0)
+       != DownloadErrorClassifier.AuthenticationFailureMessage
+    || !DownloadErrorClassifier.DescribeFailure(1, "fixture: unrecognized error", 0)
+        .Contains("fixture: unrecognized error", StringComparison.Ordinal))
+{
+    Console.Error.WriteLine("FAIL: access errors were hidden or incorrectly treated as network failures.");
+    return 53;
+}
+
+var authorizationRoot = Path.Combine(outputPath, "authorization-" + Guid.NewGuid().ToString("N"));
+var authorizationJob = new DownloadJob
+{
+    Url = "https://exhentai.org/g/99999/auth-fixture/",
+    OutputDirectory = authorizationRoot,
+    Options = new DownloadOptions("none", "edge", false, null, false, "", true, false, false, true)
+};
+try
+{
+    using var deniedService = new GalleryDlService();
+    var messages = new List<string>();
+    deniedService.OutputReceived += messages.Add;
+    var deniedExit = await deniedService.RunAsync(
+        Environment.ProcessPath!, authorizationJob, CancellationToken.None);
+    if (deniedExit != 16 || deniedService.LastRawError != authorizationError
+        || !messages.Contains(DownloadErrorClassifier.AuthenticationFailureMessage)
+        || File.Exists(Path.Combine(SettingsStore.DataDirectory, $"run-{authorizationJob.Id:N}.json")))
+    {
+        Console.Error.WriteLine("FAIL: access-denied child output lost its diagnosis or temporary config.");
+        return 54;
+    }
+}
+finally
+{
+    if (Directory.Exists(authorizationRoot)) Directory.Delete(authorizationRoot, recursive: true);
+}
+Console.WriteLine("PASS: blank-page authorization failures keep their cause and show login guidance.");
+
+using (var loginClient = new HttpClient(new LoginVerificationFixture("")))
+{
+    var loginResult = await CookieVerificationService.VerifyAsync(testCookie, loginClient);
+    if (!loginResult.EhentaiValid || loginResult.ExhentaiValid
+        || loginResult.CanAccess("https://exhentai.org/g/99999/auth-fixture/")
+        || !loginResult.CanAccess("https://e-hentai.org/g/99999/auth-fixture/")
+        || loginResult.CanAccess("https://example.com/g/99999/auth-fixture/"))
+    {
+        Console.Error.WriteLine("FAIL: E-Hentai login incorrectly unlocked ExHentai or an unrelated host.");
+        return 55;
+    }
+}
+using (var loginClient = new HttpClient(new LoginVerificationFixture(new string('x', 600))))
+{
+    var loginResult = await CookieVerificationService.VerifyAsync(testCookie, loginClient);
+    if (!loginResult.ExhentaiValid
+        || !loginResult.CanAccess("https://exhentai.org/g/99999/auth-fixture/")) return 56;
+}
+Console.WriteLine("PASS: HTTP 200 with an empty ExHentai response cannot pass login verification.");
+
 var temporaryJobsPath = Path.Combine(
     Path.GetTempPath(), $"eh-gallery-jobs-{Guid.NewGuid():N}.json");
 try
@@ -503,6 +692,12 @@ Console.WriteLine("PASS: interrupted tasks persist safely without storing Cookie
     persistedJob.State = "失败";
     JobStore.SaveToPath(temporaryJobsPath, [persistedJob]);
     if (JobStore.LoadFromPath(temporaryJobsPath).Single().Details != persistedJob.Details) return 49;
+    persistedJob.State = "需要登录";
+    persistedJob.Details = DownloadErrorClassifier.AuthenticationFailureMessage;
+    JobStore.SaveToPath(temporaryJobsPath, [persistedJob]);
+    var loginJob = JobStore.LoadFromPath(temporaryJobsPath).Single();
+    if (!loginJob.RequiresLogin || !loginJob.NeedsAttention || loginJob.ActionLabel != "检查登录"
+        || loginJob.Details != DownloadErrorClassifier.AuthenticationFailureMessage) return 57;
     JobStore.SaveToPath(temporaryJobsPath, Enumerable.Range(0, 205).Select(_ => persistedJob));
     if (JobStore.LoadFromPath(temporaryJobsPath).Count != 205) return 50;
     File.WriteAllText(temporaryJobsPath, "{truncated");
@@ -971,4 +1166,15 @@ static string ReadTextAllowingWriter(string path)
         FileShare.ReadWrite | FileShare.Delete);
     using var reader = new StreamReader(stream);
     return reader.ReadToEnd();
+}
+
+sealed class LoginVerificationFixture(string exhentaiBody) : HttpMessageHandler
+{
+    protected override Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request, CancellationToken cancellationToken) =>
+        Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+        {
+            Content = new StringContent(request.RequestUri!.Host == "exhentai.org"
+                ? exhentaiBody : "<html><title>My Home - E-Hentai</title></html>")
+        });
 }

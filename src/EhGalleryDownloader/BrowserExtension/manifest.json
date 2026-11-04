@@ -1,18 +1,28 @@
 {
   "manifest_version": 3,
   "name": "画廊登录导入",
-  "version": "1.0.0",
+  "version": "1.2.2",
   "description": "经用户确认，将当前 E-Hentai/ExHentai 页面的必要登录 Cookie 发送到本机画廊下载助手。",
   "permissions": ["cookies", "activeTab"],
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
   "host_permissions": [
-    "https://e-hentai.org/*",
-    "https://*.e-hentai.org/*",
-    "https://exhentai.org/*",
-    "https://*.exhentai.org/*",
+    "*://e-hentai.org/*",
+    "*://*.e-hentai.org/*",
+    "*://exhentai.org/*",
+    "*://*.exhentai.org/*",
     "http://127.0.0.1/*"
   ],
   "action": {
     "default_title": "导入当前画廊登录状态",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png"
+    },
     "default_popup": "popup.html"
   }
 }

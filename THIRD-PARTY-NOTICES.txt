@@ -6,10 +6,16 @@
 gallery-dl
   作者：Mike Fährmann 及贡献者
   许可证：GNU General Public License v2.0
-  随附版本：1.32.8-dev:2026.07.20（官方 Windows 构建）
+  随附版本：1.33.0-dev:2026.11.03（官方 Windows 构建）
+  构建地址：https://github.com/gdl-org/builds/releases/tag/2026.11.03
+  二进制 SHA256：baf1777cc27fce50ad5adbe77962b37c71334a701393d2c2029e2dc62cd3306f
   项目主页：https://codeberg.org/mikf/gallery-dl
   文档：https://gdl-org.github.io/docs/
   源代码：https://codeberg.org/mikf/gallery-dl
+  对应提交：6ced59829524b0d2af587c2d50b9cba44abdb420
+  对应源码：https://codeberg.org/mikf/gallery-dl/archive/6ced59829524b0d2af587c2d50b9cba44abdb420.tar.gz
+  源码 SHA256：7b77c05b8d5871d2e07e7c51758dc80de785699b31a91ff5fdaa82b547b2567d
 
 gallery-dl.exe 作为独立程序随本软件分发，版权与许可证归原项目所有。
-用户可在上述源代码地址获取与所分发版本对应的完整源代码。
+完整包的 licenses/gallery-dl-LICENSE.txt 提供 GPL v2 许可证，
+licenses/gallery-dl-source.tar.gz 提供上述提交的 gallery-dl 源代码。

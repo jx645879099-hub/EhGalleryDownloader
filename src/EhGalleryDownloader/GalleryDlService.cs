@@ -373,6 +373,8 @@ public sealed class GalleryDlService : IDisposable
 
     private static string ToChineseMessage(string line)
     {
+        if (DownloadErrorClassifier.IsAuthenticationFailure(line))
+            return DownloadErrorClassifier.AuthenticationFailureMessage;
         if (line.Contains("KeyError - 'i3'", StringComparison.OrdinalIgnoreCase))
             return "下载内核兼容错误（KeyError i3）。继续重复点击不会解决；请先更新内核，再继续这个任务。";
         if (line.Contains("cookies", StringComparison.OrdinalIgnoreCase)
@@ -383,9 +385,6 @@ public sealed class GalleryDlService : IDisposable
             || (line.Contains("SSL", StringComparison.OrdinalIgnoreCase)
                 && line.Contains("EOF", StringComparison.OrdinalIgnoreCase)))
             return "当前 Clash 节点与图片服务器的加密连接被中途切断，内核正在有限重试；如果反复出现，请停止任务并更换节点。";
-        if (line.Contains("AuthenticationError", StringComparison.OrdinalIgnoreCase)
-            || line.Contains("authentication", StringComparison.OrdinalIgnoreCase))
-            return "登录状态无效。请在所选浏览器中重新登录网站。";
         if (line.Contains("429", StringComparison.OrdinalIgnoreCase))
             return "网站提示请求过于频繁（429），内核正在按间隔重试。";
         if (line.Contains("timeout", StringComparison.OrdinalIgnoreCase))

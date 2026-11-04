@@ -41,13 +41,16 @@ public sealed class DownloadJob : INotifyPropertyChanged
     public string GalleryTitle { get => _galleryTitle; set { if (Set(ref _galleryTitle, value)) OnPropertyChanged(nameof(GalleryDisplayName)); } }
 
     public bool IsActive => State is "下载中" or "自动续传" or "准备中";
-    public bool NeedsAttention => State is "失败" or "需要更新内核";
+    public bool RequiresLogin => State == "需要登录";
+    public bool NeedsAttention => State is "失败" or "需要更新内核" or "需要登录";
     public string StatusLabel => State == "已停止" ? "已暂停" : State;
-    public string ActionLabel => State == "已完成" ? "检查缺失图片" : "继续下载";
+    public string ActionLabel => RequiresLogin ? "检查登录"
+        : State == "已完成" ? "检查缺失图片" : "继续下载";
     public string PhaseText => State switch
     {
         "失败" => "下载中断 · 已完成的图片已保留",
         "需要更新内核" => "请先更新下载内核，再继续此任务",
+        "需要登录" => "网站拒绝访问 · 请检查登录和账号权限",
         "已停止" => "已暂停 · 随时可以继续",
         "已完成" => "下载完成",
         "排队中" or "等待" => "等待开始",
@@ -68,6 +71,7 @@ public sealed class DownloadJob : INotifyPropertyChanged
             "已停止" => "等待继续",
             "排队中" or "等待" => "等待开始",
             "失败" => "未完成",
+            "需要登录" => "等待验证登录",
             _ => "正在准备"
         }
         : $"{CompletedFiles} 完成 / {SkippedFiles} 已有 / {FailedFiles} 失败";
@@ -158,7 +162,7 @@ public sealed class DownloadJob : INotifyPropertyChanged
 
     private void NotifyStatusChanged()
     {
-        foreach (var name in new[] { nameof(IsActive), nameof(NeedsAttention), nameof(StatusLabel),
+        foreach (var name in new[] { nameof(IsActive), nameof(RequiresLogin), nameof(NeedsAttention), nameof(StatusLabel),
                      nameof(ActionLabel), nameof(PhaseText), nameof(StatusColor), nameof(StatusBackground) })
             OnPropertyChanged(name);
     }

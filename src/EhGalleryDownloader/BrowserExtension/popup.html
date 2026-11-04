@@ -8,10 +8,12 @@
 </head>
 <body>
   <main>
-    <div class="brand"><span>廊</span><div><strong>画廊登录导入</strong><small>只连接本机下载助手</small></div></div>
-    <section id="scope">仅读取当前 E-Hentai / ExHentai 页面的三项必要登录 Cookie，不读取密码和其他网站。</section>
-    <div id="status">请先在画廊下载助手中点击“从当前网页导入”。</div>
-    <button id="import">导入当前网页登录状态</button>
+    <div class="brand"><img src="icons/icon-48.png" alt="" width="40" height="40"><div><strong>画廊登录导入</strong><small>扩展 1.2.2 · 只连接本机下载助手</small></div></div>
+    <section id="scope"><strong>按顺序操作</strong><ol><li>在下载助手点击“开始接收 Cookie”，再点“开始等待浏览器”。</li><li>切换到本窗口已登录的画廊网页；下载里站时请打开 ExHentai。</li><li>点击下面的“发送到下载助手”，然后回软件查看验证结果。</li></ol></section>
+    <div id="status">网页保持登录不会自动发送，需要点击下面的按钮。</div>
+    <button id="import">发送到下载助手</button>
+    <button id="diagnose" class="secondary">检查 Cookie 读取（不发送）</button>
+    <div id="diagnostics" aria-live="polite"></div>
     <small class="privacy">数据只发送到 127.0.0.1，不会上传互联网。</small>
   </main>
   <script src="popup.js"></script>

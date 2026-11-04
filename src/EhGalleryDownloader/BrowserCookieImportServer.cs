@@ -22,12 +22,15 @@ public sealed class BrowserCookieImportServer : IAsyncDisposable
 {
     public const int FirstPort = 17893;
     public const int LastPort = 17902;
+    public static readonly TimeSpan ImportTimeout = TimeSpan.FromMinutes(5);
     private const int MaxRequestBytes = 32 * 1024;
     private readonly TcpListener _listener;
     private readonly string _token = Convert.ToHexString(Guid.NewGuid().ToByteArray());
     private bool _disposed;
+    private DateTimeOffset _expiresAt;
 
     public int Port { get; }
+    public event Action<string>? StatusChanged;
 
     private BrowserCookieImportServer(TcpListener listener, int port)
     {
@@ -60,32 +63,62 @@ public sealed class BrowserCookieImportServer : IAsyncDisposable
         TimeSpan timeout,
         CancellationToken cancellationToken = default)
     {
+        _expiresAt = DateTimeOffset.UtcNow.Add(timeout);
         using var timeoutCancellation = new CancellationTokenSource(timeout);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(
             cancellationToken, timeoutCancellation.Token);
+        var completion = new TaskCompletionSource<BrowserCookieImportResult>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var clients = new List<Task>();
 
-        try
+        async Task HandleConnectionAsync(TcpClient client)
         {
-            while (true)
+            using (client)
+            using (var clientDeadline = CancellationTokenSource.CreateLinkedTokenSource(linked.Token))
             {
-                using var client = await _listener.AcceptTcpClientAsync(linked.Token)
-                    .ConfigureAwait(false);
-                using var clientDeadline = CancellationTokenSource.CreateLinkedTokenSource(linked.Token);
                 clientDeadline.CancelAfter(TimeSpan.FromSeconds(5));
                 try
                 {
                     var result = await HandleClientAsync(client, clientDeadline.Token).ConfigureAwait(false);
-                    if (result is not null) return result;
+                    if (result is not null) completion.TrySetResult(result);
                 }
-                catch (OperationCanceledException) when (!linked.IsCancellationRequested) { }
+                catch (OperationCanceledException) { }
                 catch (IOException) { }
                 catch (SocketException) { }
+                catch (Exception ex) { completion.TrySetException(ex); }
             }
+        }
+
+        async Task AcceptConnectionsAsync()
+        {
+            while (!linked.IsCancellationRequested)
+            {
+                var client = await _listener.AcceptTcpClientAsync(linked.Token).ConfigureAwait(false);
+                clients.RemoveAll(task => task.IsCompleted);
+                if (clients.Count >= 4) { client.Dispose(); continue; }
+                clients.Add(HandleConnectionAsync(client));
+            }
+        }
+
+        var accepting = AcceptConnectionsAsync();
+        try
+        {
+            if (await Task.WhenAny(completion.Task, accepting).ConfigureAwait(false) == accepting)
+                await accepting.ConfigureAwait(false);
+            return await completion.Task.WaitAsync(linked.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (
             timeoutCancellation.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
         {
-            throw new TimeoutException("等待浏览器响应超时，请重新点击导入后再试。");
+            throw new TimeoutException("等待已结束，尚未收到登录信息。请确认 Chrome 已安装“画廊登录导入”扩展，"
+                + "然后重新开始接收，并在已登录的画廊网页点击扩展里的“发送到下载助手”。");
+        }
+        finally
+        {
+            linked.Cancel();
+            try { await accepting.ConfigureAwait(false); }
+            catch (OperationCanceledException) { }
+            await Task.WhenAll(clients).ConfigureAwait(false);
         }
     }
 
@@ -96,6 +129,12 @@ public sealed class BrowserCookieImportServer : IAsyncDisposable
     {
         cookieHeader = "";
         error = "";
+        if (!Uri.TryCreate(payload?.PageUrl, UriKind.Absolute, out var pageUri)
+            || !CookieParser.CanSendTo(pageUri))
+        {
+            error = "请在已登录的 HTTPS 画廊网页打开扩展，不能从其他网站导入。";
+            return false;
+        }
         if (payload?.Cookies is null || payload.Cookies.Count == 0)
         {
             error = "当前网页没有找到可用的登录 Cookie。请确认网页已经登录。";
@@ -106,7 +145,8 @@ public sealed class BrowserCookieImportServer : IAsyncDisposable
         {
             "ipb_member_id", "ipb_pass_hash", "igneous"
         };
-        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var ehValues = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var exValues = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var cookie in payload.Cookies)
         {
             if (cookie is null || string.IsNullOrWhiteSpace(cookie.Name)
@@ -117,18 +157,46 @@ public sealed class BrowserCookieImportServer : IAsyncDisposable
                 || cookie.Value.Length > 4096
                 || cookie.Value.Any(ch => ch is '\r' or '\n' or ';'))
                 continue;
-            values[cookie.Name] = cookie.Value;
+            var siteValues = IsExhentaiDomain(cookie.Domain) ? exValues : ehValues;
+            // chrome.cookies.getAll returns the most specific applicable path first.
+            siteValues.TryAdd(cookie.Name, cookie.Value);
         }
 
-        if (!values.ContainsKey("ipb_member_id") || !values.ContainsKey("ipb_pass_hash"))
+        var isExhentai = IsExhentaiDomain(pageUri.Host);
+        var preferred = isExhentai ? exValues : ehValues;
+        var fallback = isExhentai ? ehValues : exValues;
+        var account = HasAccountPair(preferred) ? preferred : fallback;
+        if (!HasAccountPair(account))
         {
-            error = "没有找到完整的登录状态。请在已登录的 E-Hentai 或 ExHentai 页面重试。";
+            error = "没有找到同一网站的完整登录信息。请在当前 Chrome 用户的画廊网页重新登录，再打开扩展发送。";
             return false;
         }
 
+        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["ipb_member_id"] = account["ipb_member_id"],
+            ["ipb_pass_hash"] = account["ipb_pass_hash"]
+        };
+        var hasIgneous = exValues.TryGetValue("igneous", out var igneous)
+            && !igneous.Equals("mystery", StringComparison.OrdinalIgnoreCase)
+            && !igneous.Equals("null", StringComparison.OrdinalIgnoreCase);
+        if (isExhentai && !hasIgneous)
+        {
+            error = "已找到账号登录信息，但缺少 ExHentai 的有效 igneous。请先在同一 Chrome 用户中打开并刷新 ExHentai，"
+                + "确认能看到画廊内容后，再点击扩展发送。如果仍是空白页，请检查账号访问权限。";
+            return false;
+        }
+        if (hasIgneous) values["igneous"] = igneous!;
         cookieHeader = CookieParser.ToRequestHeader(values);
         return true;
     }
+
+    private static bool HasAccountPair(IReadOnlyDictionary<string, string> values) =>
+        values.ContainsKey("ipb_member_id") && values.ContainsKey("ipb_pass_hash");
+
+    private static bool IsExhentaiDomain(string domain) =>
+        domain.TrimStart('.').Equals("exhentai.org", StringComparison.OrdinalIgnoreCase)
+        || domain.EndsWith(".exhentai.org", StringComparison.OrdinalIgnoreCase);
 
     private async Task<BrowserCookieImportResult?> HandleClientAsync(
         TcpClient client,
@@ -138,16 +206,28 @@ public sealed class BrowserCookieImportServer : IAsyncDisposable
         var request = await ReadRequestAsync(stream, cancellationToken).ConfigureAwait(false);
         if (request is null) return null;
 
-        var originAllowed = request.Origin.StartsWith(
+        var extensionOrigin = request.Origin.StartsWith(
             "chrome-extension://", StringComparison.OrdinalIgnoreCase);
+        // Host-permitted Chrome / Edge extension fetches can omit Origin.
+        // Keep the non-safelisted marker and import token mandatory, reject supplied
+        // website origins, and validate Host so DNS rebinding cannot use this path.
+        var originAllowed = request.Origin.Length == 0 || extensionOrigin;
+        if (!request.Host.Equals($"127.0.0.1:{Port}", StringComparison.OrdinalIgnoreCase)
+            || !originAllowed)
+        {
+            await WriteResponseAsync(stream, 403, "{\"error\":\"forbidden\"}", "", cancellationToken)
+                .ConfigureAwait(false);
+            return null;
+        }
         if (request.Method == "OPTIONS")
         {
-            await WriteResponseAsync(stream, originAllowed ? 204 : 403, "", request.Origin, cancellationToken)
+            await WriteResponseAsync(stream, extensionOrigin ? 204 : 403, "",
+                    extensionOrigin ? request.Origin : "", cancellationToken)
                 .ConfigureAwait(false);
             return null;
         }
 
-        if (!originAllowed || request.ExtensionMarker != "1")
+        if (request.ExtensionMarker != "1")
         {
             await WriteResponseAsync(stream, 403, "{\"error\":\"forbidden\"}", "", cancellationToken)
                 .ConfigureAwait(false);
@@ -156,11 +236,12 @@ public sealed class BrowserCookieImportServer : IAsyncDisposable
 
         if (request.Method == "GET" && request.Path == "/session")
         {
+            StatusChanged?.Invoke("浏览器扩展已连接，正在等待它发送登录信息");
             var json = JsonSerializer.Serialize(new
             {
                 token = _token,
                 app = "EhGalleryDownloader",
-                expiresInSeconds = 120
+                expiresInSeconds = Math.Max(0, (int)(_expiresAt - DateTimeOffset.UtcNow).TotalSeconds)
             });
             await WriteResponseAsync(stream, 200, json, request.Origin, cancellationToken).ConfigureAwait(false);
             return null;
@@ -196,6 +277,7 @@ public sealed class BrowserCookieImportServer : IAsyncDisposable
 
         if (!TryCreateCookieHeader(payload, out var header, out var error))
         {
+            StatusChanged?.Invoke("扩展已连接，但登录信息未通过检查：" + error);
             await WriteResponseAsync(
                     stream, 422, JsonSerializer.Serialize(new { error }), request.Origin, cancellationToken)
                 .ConfigureAwait(false);
@@ -204,6 +286,7 @@ public sealed class BrowserCookieImportServer : IAsyncDisposable
 
         await WriteResponseAsync(stream, 200, "{\"ok\":true}", request.Origin, cancellationToken)
             .ConfigureAwait(false);
+        StatusChanged?.Invoke("已收到浏览器登录信息，接下来验证网站是否接受");
         return new BrowserCookieImportResult(header, payload.Browser, payload.PageUrl);
     }
 
@@ -276,6 +359,7 @@ public sealed class BrowserCookieImportServer : IAsyncDisposable
         return new HttpRequest(
             requestLine[0].ToUpperInvariant(),
             requestLine[1].Split('?', 2)[0],
+            headers.GetValueOrDefault("Host") ?? "",
             headers.GetValueOrDefault("Origin") ?? "",
             headers.GetValueOrDefault("X-EhGallery-Extension") ?? "",
             body);
@@ -340,6 +424,7 @@ public sealed class BrowserCookieImportServer : IAsyncDisposable
     private sealed record HttpRequest(
         string Method,
         string Path,
+        string Host,
         string Origin,
         string ExtensionMarker,
         string Body);

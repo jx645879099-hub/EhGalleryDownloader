@@ -6,7 +6,13 @@ namespace EhGalleryDownloader;
 public sealed record CookieVerificationResult(
     bool EhentaiValid,
     bool ExhentaiValid,
-    string Message);
+    string Message)
+{
+    public bool CanAccess(string galleryUrl) =>
+        GalleryUrlValidator.TryNormalize(galleryUrl, out var normalized, out _)
+        && (new Uri(normalized).Host.EndsWith("exhentai.org", StringComparison.OrdinalIgnoreCase)
+            ? ExhentaiValid : EhentaiValid);
+}
 
 public static class CookieVerificationService
 {
@@ -15,7 +21,7 @@ public static class CookieVerificationService
         string? proxyUrl,
         CancellationToken cancellationToken = default)
     {
-        if (!CookieParser.TryParse(cookieText, out var cookies, out var parseError))
+        if (!CookieParser.TryParse(cookieText, out _, out var parseError))
             return new CookieVerificationResult(false, false, parseError);
 
         var handler = new HttpClientHandler
@@ -32,6 +38,17 @@ public static class CookieVerificationService
         }
 
         using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(25) };
+        return await VerifyAsync(cookieText, client, cancellationToken).ConfigureAwait(false);
+    }
+
+    public static async Task<CookieVerificationResult> VerifyAsync(
+        string cookieText,
+        HttpClient client,
+        CancellationToken cancellationToken = default)
+    {
+        if (!CookieParser.TryParse(cookieText, out var cookies, out var parseError))
+            return new CookieVerificationResult(false, false, parseError);
+
         var cookieHeader = CookieParser.ToRequestHeader(cookies);
 
         using var ehResponse = await SendAsync(
@@ -75,7 +92,9 @@ public static class CookieVerificationService
         return exValid
             ? new CookieVerificationResult(true, true, "登录有效：E-Hentai 和 ExHentai 均可使用。")
             : new CookieVerificationResult(true, false,
-                "E-Hentai 登录有效；ExHentai 未验证通过。如果只下载表站可以直接使用。");
+                "E-Hentai 登录有效，但 ExHentai 未通过验证。下载 ExHentai 画廊前，"
+                + "请先在浏览器确认可以打开该画廊，再从 ExHentai 页面重新导入 Cookie。"
+                + "如果浏览器也无法打开，请先检查账号访问权限。");
     }
 
     private static async Task<HttpResponseMessage> SendAsync(
