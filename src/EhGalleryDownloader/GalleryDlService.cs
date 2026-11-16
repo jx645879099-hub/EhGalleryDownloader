@@ -42,6 +42,8 @@ public sealed class GalleryDlService : IDisposable
         CancellationToken cancellationToken,
         bool compatibilityResume = false)
     {
+        if (job.Options.UseProxy && !NetworkRouting.TryGetProxyUri(job.Options.ProxyUrl, out _))
+            throw new ArgumentException("代理地址无效。请检查网络设置，或切换为“直连”。");
         Directory.CreateDirectory(job.OutputDirectory);
         Directory.CreateDirectory(SettingsStore.DataDirectory);
         Directory.CreateDirectory(SettingsStore.LogDirectory);
@@ -195,8 +197,7 @@ public sealed class GalleryDlService : IDisposable
         Add(info, "--option", "extractor.exhentai.gp=resized");
         Add(info, "--option", $"extractor.exhentai.original={job.Options.DownloadOriginal.ToString().ToLowerInvariant()}");
 
-        if (job.Options.UseProxy)
-            Add(info, "--proxy", job.Options.ProxyUrl);
+        NetworkRouting.ConfigureGalleryDl(info, job.Options.UseProxy, job.Options.ProxyUrl);
         if (job.Options.UseBrowserCookies)
             Add(info, "--cookies-from-browser", job.Options.Browser);
         if (job.Options.ForceIpv4)
@@ -384,11 +385,11 @@ public sealed class GalleryDlService : IDisposable
         if (line.Contains("UNEXPECTED_EOF_WHILE_READING", StringComparison.OrdinalIgnoreCase)
             || (line.Contains("SSL", StringComparison.OrdinalIgnoreCase)
                 && line.Contains("EOF", StringComparison.OrdinalIgnoreCase)))
-            return "当前 Clash 节点与图片服务器的加密连接被中途切断，内核正在有限重试；如果反复出现，请停止任务并更换节点。";
+            return "与图片服务器的加密连接被中途切断，下载组件正在有限重试；如果反复出现，请检查网络连接后继续。";
         if (line.Contains("429", StringComparison.OrdinalIgnoreCase))
             return "网站提示请求过于频繁（429），内核正在按间隔重试。";
         if (line.Contains("timeout", StringComparison.OrdinalIgnoreCase))
-            return "网络连接超时，内核正在重试；如果持续发生，可以换 Clash 节点后继续。";
+            return "网络连接超时，下载组件正在重试；如果持续发生，请检查当前网络连接后继续。";
         if (line.Contains("unsupported URL", StringComparison.OrdinalIgnoreCase))
             return "这个链接暂不受支持，请粘贴画廊首页链接，而不是单张图片链接。";
         if (line.Contains("not found", StringComparison.OrdinalIgnoreCase)

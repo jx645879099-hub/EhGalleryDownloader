@@ -54,7 +54,7 @@ public static class GallerySampleService
             Add(info, "--no-input", "--no-colors", "--get-urls", "--range",
                 $"1-{maximumItems}");
             Add(info, "--http-timeout", "25", "--retries", "1");
-            if (options.UseProxy) Add(info, "--proxy", options.ProxyUrl);
+            NetworkRouting.ConfigureGalleryDl(info, options.UseProxy, options.ProxyUrl);
             if (options.UseBrowserCookies)
                 Add(info, "--cookies-from-browser", options.Browser);
             if (options.ForceIpv4) Add(info, "--force-ipv4");
@@ -137,9 +137,9 @@ public static class GallerySampleService
         if (stderr.Contains("UNEXPECTED_EOF", StringComparison.OrdinalIgnoreCase)
             || (stderr.Contains("SSL", StringComparison.OrdinalIgnoreCase)
                 && stderr.Contains("EOF", StringComparison.OrdinalIgnoreCase)))
-            return "当前节点连接画廊图片服务器时被中途断开。Clash 本身正在运行，但这条节点到 H@H 图片服务器不稳定。";
+            return "与画廊图片服务器的连接被中途断开，请检查当前网络连接后重试。";
         if (stderr.Contains("timeout", StringComparison.OrdinalIgnoreCase))
-            return "读取画廊信息超时。Clash 本身可能正常，但当前节点到画廊服务器的线路较慢。";
+            return "读取画廊信息超时，请检查当前网络是否能访问画廊后重试。";
         if (stderr.Contains("cookies", StringComparison.OrdinalIgnoreCase))
             return "读取浏览器登录信息失败。可以改用手动粘贴 Cookie。";
         if (stderr.Contains("unsupported URL", StringComparison.OrdinalIgnoreCase))

@@ -24,18 +24,9 @@ public static class CookieVerificationService
         if (!CookieParser.TryParse(cookieText, out _, out var parseError))
             return new CookieVerificationResult(false, false, parseError);
 
-        var handler = new HttpClientHandler
-        {
-            AllowAutoRedirect = false,
-            AutomaticDecompression = DecompressionMethods.All,
-            UseCookies = false,
-            UseProxy = !string.IsNullOrWhiteSpace(proxyUrl)
-        };
-        if (!string.IsNullOrWhiteSpace(proxyUrl))
-        {
-            handler.Proxy = new WebProxy(proxyUrl);
-            handler.UseProxy = true;
-        }
+        var handler = NetworkRouting.CreateHandler(proxyUrl, allowAutoRedirect: false);
+        handler.AutomaticDecompression = DecompressionMethods.All;
+        handler.UseCookies = false;
 
         using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(25) };
         return await VerifyAsync(cookieText, client, cancellationToken).ConfigureAwait(false);

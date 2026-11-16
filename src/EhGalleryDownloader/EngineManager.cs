@@ -38,20 +38,31 @@ public sealed record EngineUpdateInfo(
 
 public sealed class EngineManager
 {
+    private readonly Func<string?, bool, TimeSpan, HttpClient> _createClient;
+    private readonly string _applicationDirectory;
+
+    public EngineManager(
+        Func<string?, bool, TimeSpan, HttpClient>? createClient = null,
+        string? applicationDirectory = null)
+    {
+        _createClient = createClient ?? CreateClient;
+        _applicationDirectory = applicationDirectory ?? AppContext.BaseDirectory;
+    }
+
     private const string LatestReleaseUrl =
         "https://github.com/gdl-org/builds/releases/latest";
     private const string ExpandedAssetsBaseUrl =
         "https://github.com/gdl-org/builds/releases/expanded_assets/";
 
     public string BundledEnginePath =>
-        Path.Combine(AppContext.BaseDirectory, "tools", "gallery-dl.exe");
+        Path.Combine(_applicationDirectory, "tools", "gallery-dl.exe");
 
     public string? FindEngine()
     {
         var candidates = new[]
         {
             BundledEnginePath,
-            Path.Combine(AppContext.BaseDirectory, "gallery-dl.exe")
+            Path.Combine(_applicationDirectory, "gallery-dl.exe")
         };
 
         foreach (var path in candidates)
@@ -77,14 +88,14 @@ public sealed class EngineManager
     {
         try
         {
-            using var client = CreateClient(proxyUrl, allowAutoRedirect: false, TimeSpan.FromSeconds(30));
+            using var client = _createClient(proxyUrl, true, TimeSpan.FromSeconds(30));
             using var latestResponse = await client.GetAsync(
                 LatestReleaseUrl,
                 HttpCompletionOption.ResponseHeadersRead,
                 cancellationToken).ConfigureAwait(false);
             EnsureUpdateResponse(latestResponse, "读取最新版信息");
 
-            var tag = ExtractReleaseTag(latestResponse);
+            var tag = GitHubReleaseParser.GetTag(latestResponse);
             if (string.IsNullOrWhiteSpace(tag))
                 throw new EngineUpdateException(
                     EngineUpdateFailureKind.ReleaseUnavailable,
@@ -125,9 +136,9 @@ public sealed class EngineManager
                 "连接官方发布页超时。");
         }
         catch (OperationCanceledException) { throw; }
-        catch (HttpRequestException ex) when (
-            ex.Message.Contains("proxy", StringComparison.OrdinalIgnoreCase)
-            || ex.Message.Contains("refused", StringComparison.OrdinalIgnoreCase))
+        catch (HttpRequestException ex) when (!string.IsNullOrWhiteSpace(proxyUrl)
+            && (ex.Message.Contains("proxy", StringComparison.OrdinalIgnoreCase)
+                || ex.Message.Contains("refused", StringComparison.OrdinalIgnoreCase)))
         {
             throw new EngineUpdateException(
                 EngineUpdateFailureKind.ProxyUnavailable,
@@ -162,9 +173,9 @@ public sealed class EngineManager
 
         try
         {
-            using var client = CreateClient(
+            using var client = _createClient(
                 proxyUrl,
-                allowAutoRedirect: true,
+                true,
                 TimeSpan.FromMinutes(8));
             using var response = await client.GetAsync(
                 update.DownloadUrl,
@@ -239,9 +250,9 @@ public sealed class EngineManager
         {
             throw;
         }
-        catch (HttpRequestException ex) when (
-            ex.Message.Contains("proxy", StringComparison.OrdinalIgnoreCase)
-            || ex.Message.Contains("refused", StringComparison.OrdinalIgnoreCase))
+        catch (HttpRequestException ex) when (!string.IsNullOrWhiteSpace(proxyUrl)
+            && (ex.Message.Contains("proxy", StringComparison.OrdinalIgnoreCase)
+                || ex.Message.Contains("refused", StringComparison.OrdinalIgnoreCase)))
         {
             throw new EngineUpdateException(
                 EngineUpdateFailureKind.ProxyUnavailable,
@@ -302,26 +313,9 @@ public sealed class EngineManager
         }
     }
 
-    private static string ExtractReleaseTag(HttpResponseMessage response)
-    {
-        var location = response.Headers.Location;
-        if (location is null && response.RequestMessage?.RequestUri is { } finalUri)
-            location = finalUri;
-        var text = location?.ToString() ?? "";
-        var marker = "/releases/tag/";
-        var index = text.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
-        return index < 0
-            ? ""
-            : Uri.UnescapeDataString(text[(index + marker.Length)..].Trim('/'));
-    }
-
     private static void EnsureUpdateResponse(HttpResponseMessage response, string action)
     {
-        if (response.IsSuccessStatusCode
-            || response.StatusCode is HttpStatusCode.Found
-                or HttpStatusCode.MovedPermanently
-                or HttpStatusCode.TemporaryRedirect
-                or HttpStatusCode.PermanentRedirect)
+        if (response.IsSuccessStatusCode)
             return;
 
         if (response.StatusCode is HttpStatusCode.Forbidden
@@ -344,16 +338,7 @@ public sealed class EngineManager
         bool allowAutoRedirect,
         TimeSpan timeout)
     {
-        var handler = new HttpClientHandler
-        {
-            AllowAutoRedirect = allowAutoRedirect,
-            UseProxy = !string.IsNullOrWhiteSpace(proxyUrl)
-        };
-        if (!string.IsNullOrWhiteSpace(proxyUrl))
-        {
-            handler.Proxy = new WebProxy(proxyUrl);
-            handler.UseProxy = true;
-        }
+        var handler = NetworkRouting.CreateHandler(proxyUrl, allowAutoRedirect);
 
         var client = new HttpClient(handler) { Timeout = timeout };
         client.DefaultRequestHeaders.UserAgent.ParseAdd("EhGalleryDownloader/1.3");
@@ -382,7 +367,7 @@ public sealed record ReleaseAsset(string DownloadUrl, string? Sha256Digest);
 public static class ReleaseAssetParser
 {
     private static readonly Regex AssetLinkRegex = new(
-        "href=\"(?<href>[^\"]*/releases/download/[^\"]*/(?<name>[^\"]+\\.exe))\"",
+        "href=\"(?<href>[^\"]*/releases/download/[^\"]*/(?<name>[^\"/]+))\"",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex DigestRegex = new(
         "sha256:(?<digest>[0-9a-f]{64})",
@@ -415,8 +400,7 @@ public static class ReleaseAssetParser
                 $"官方版本 {tag} 中暂时没有找到 64 位 Windows 内核。");
 
         var nextAsset = matches.FirstOrDefault(item => item.Match.Index > selected.Match.Index);
-        var digestWindowLength = Math.Min(1200,
-            (nextAsset?.Match.Index ?? html.Length) - selected.Match.Index);
+        var digestWindowLength = (nextAsset?.Match.Index ?? html.Length) - selected.Match.Index;
         var digestWindow = html.Substring(selected.Match.Index, digestWindowLength);
         var digestMatch = DigestRegex.Match(digestWindow);
         var digest = digestMatch.Success

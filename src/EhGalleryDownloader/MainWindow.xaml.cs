@@ -34,6 +34,7 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _browserImportCancellation;
     private CancellationTokenSource? _nodeTestCancellation;
     private CancellationTokenSource? _engineUpdateCancellation;
+    private CancellationTokenSource? _applicationUpdateCancellation;
     private DownloadJob? _runningJob;
     private MihomoClient? _mihomoClient;
     private ClashState? _clashState;
@@ -60,6 +61,9 @@ public partial class MainWindow : Window
     private bool _stopQueueRequested;
     private bool _composerExpandedWhileBusy;
     private string? _verifiedManualCookie;
+    private bool _applyingSettings = true;
+    private bool _syncingConnectionMode;
+    private bool _isClosing;
 
     public MainWindow()
     {
@@ -98,21 +102,23 @@ public partial class MainWindow : Window
         UpdateDownloadStats();
         Loaded += async (_, _) =>
         {
-            if (AutoDetectProxyCheckBox.IsChecked == true)
-                await RefreshAutoDetectedProxyAsync(showStatus: false);
             await RefreshEngineStatusAsync();
+            if (_isClosing) return;
             await CheckApplicationUpdateAsync(showLatest: false);
-            if (!IsOperationBusy && File.Exists(_nodeRecoveryPath))
+            if (!_isClosing && UseProxyCheckBox.IsChecked == true
+                && !IsOperationBusy && File.Exists(_nodeRecoveryPath))
                 await EnsureNodeTesterConnectedAsync(showError: false);
         };
         Closing += (_, _) =>
         {
+            _isClosing = true;
             _preparationCancellation?.Cancel();
             _downloadCancellation?.Cancel();
             _cookieVerificationCancellation?.Cancel();
             _browserImportCancellation?.Cancel();
             _nodeTestCancellation?.Cancel();
             _engineUpdateCancellation?.Cancel();
+            _applicationUpdateCancellation?.Cancel();
             _service?.Dispose();
             _mihomoClient?.Dispose();
             SaveSettings();
@@ -159,6 +165,8 @@ public partial class MainWindow : Window
             }
         }
         UpdateLoginModeUi();
+        _applyingSettings = false;
+        UpdateNetworkUi();
         UpdateSettingsSummary();
     }
 
@@ -201,7 +209,7 @@ public partial class MainWindow : Window
     private async void NodeNavButton_Click(object sender, RoutedEventArgs e)
     {
         ShowPage(2);
-        if (!IsOperationBusy)
+        if (!IsOperationBusy && UseProxyCheckBox.IsChecked == true)
         {
             NodeTestStatusText.Text = "正在连接 Clash/Mihomo 控制接口…";
             await EnsureNodeTesterConnectedAsync(showError: false);
@@ -274,7 +282,7 @@ public partial class MainWindow : Window
     {
         if (CurrentSettingsSummaryText is null) return;
         var quality = GetSelectedTag(QualityComboBox, "original") == "original" ? "原图" : "压缩图";
-        var failover = GetSelectedTag(AutoFailoverModeComboBox, "top3") switch
+        var failover = UseProxyCheckBox.IsChecked != true ? "直连" : GetSelectedTag(AutoFailoverModeComboBox, "top3") switch
         {
             "off" => "固定当前节点",
             "all" => "自动遍历节点",
@@ -297,7 +305,7 @@ public partial class MainWindow : Window
             || job.State != "已完成") ? Visibility.Collapsed : Visibility.Visible;
     }
 
-    private async Task RefreshEngineStatusAsync()
+    private async Task RefreshEngineStatusAsync(string? statusMessage = null)
     {
         try
         {
@@ -327,6 +335,7 @@ public partial class MainWindow : Window
             EngineStatusText.Text = "内核检查失败";
             FooterStatusText.Text = ex.Message;
         }
+        if (statusMessage is not null) FooterStatusText.Text = statusMessage;
     }
 
     private async void InstallEngineButton_Click(object sender, RoutedEventArgs e)
@@ -338,7 +347,7 @@ public partial class MainWindow : Window
         _engineUpdateCancellation = new CancellationTokenSource();
         SetRunningUi(false);
         InstallEngineButton.IsEnabled = false;
-        EngineStatusText.Text = "正在检查…";
+        EngineStatusText.Text = $"通过{GetConnectionLabel()}检查更新…";
         EngineDot.Fill = (Brush)FindResource("WarningBrush");
         ActivityProgressBar.Visibility = Visibility.Visible;
         ActivityProgressBar.IsIndeterminate = true;
@@ -354,10 +363,9 @@ public partial class MainWindow : Window
                 proxy, _engineUpdateCancellation.Token);
             if (update.IsLatest)
             {
-                FooterStatusText.Text = $"当前已是最新版（{update.LocalVersion}），没有下载任何文件。";
+                await RefreshEngineStatusAsync($"组件 {update.LocalVersion} 已是最新版，无需下载。");
                 MessageBox.Show($"当前内核 {update.LocalVersion} 已经是最新版，不需要下载。",
                     "无需更新", MessageBoxButton.OK, MessageBoxImage.Information);
-                await RefreshEngineStatusAsync();
                 return;
             }
 
@@ -368,8 +376,7 @@ public partial class MainWindow : Window
                     "发现更新", MessageBoxButton.YesNo, MessageBoxImage.Question);
                 if (answer != MessageBoxResult.Yes)
                 {
-                    FooterStatusText.Text = "已取消更新，继续使用当前内核。";
-                    await RefreshEngineStatusAsync();
+                    await RefreshEngineStatusAsync("已取消更新，继续使用当前内核。");
                     return;
                 }
             }
@@ -379,17 +386,17 @@ public partial class MainWindow : Window
             var progress = new Progress<double>(value => ActivityProgressBar.Value = value);
             await _engineManager.InstallAsync(
                 update, proxy, progress, _engineUpdateCancellation.Token);
-            FooterStatusText.Text = update.EngineMissing ? "下载内核安装完成。" : "下载内核更新完成。";
-            await RefreshEngineStatusAsync();
+            await RefreshEngineStatusAsync(update.EngineMissing ? "下载组件安装完成。" : "下载组件更新完成。");
         }
         catch (OperationCanceledException)
         {
-            FooterStatusText.Text = "内核更新已取消，原来的内核没有被修改。";
-            await RefreshEngineStatusAsync();
+            await RefreshEngineStatusAsync("组件更新已取消，原来的组件没有被修改。");
         }
         catch (Exception ex)
         {
-            var existingVersion = await _engineManager.GetVersionAsync();
+            string? existingVersion = null;
+            try { existingVersion = await _engineManager.GetVersionAsync(); }
+            catch { }
             var explanation = DescribeEngineUpdateFailure(ex, existingVersion);
             EngineStatusText.Text = string.IsNullOrWhiteSpace(existingVersion)
                 ? "缺少下载内核"
@@ -413,7 +420,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private static string DescribeEngineUpdateFailure(Exception exception, string? existingVersion)
+    private string DescribeEngineUpdateFailure(Exception exception, string? existingVersion)
     {
         var suffix = string.IsNullOrWhiteSpace(existingVersion)
             ? ""
@@ -423,11 +430,11 @@ public partial class MainWindow : Window
             var message = updateError.Kind switch
             {
                 EngineUpdateFailureKind.RateLimited =>
-                    "官方发布服务器暂时限制了更新请求。这不代表 Clash 没有运行，请稍后再试。",
+                    "官方发布服务器暂时限制了更新请求，请稍后再试。",
                 EngineUpdateFailureKind.ProxyUnavailable =>
-                    "无法连接软件中填写的本地代理地址。请核对“使用 Clash 代理”旁边的地址；能正常浏览网页并不一定代表该 HTTP 端口相同。",
+                    "无法连接填写的代理地址。请在左下角切换为“直连”，或在“网络与节点”中核对代理地址。",
                 EngineUpdateFailureKind.TimedOut =>
-                    "访问官方发布页超时。当前节点到 GitHub 的线路可能较慢，可以换节点后再检查。",
+                    $"通过{GetConnectionLabel()}访问 GitHub 超时，请检查当前网络后再试。",
                 EngineUpdateFailureKind.ReleaseUnavailable =>
                     "官方正在发布新版本，但 Windows 文件暂时还没准备好，请稍后再试。",
                 EngineUpdateFailureKind.InvalidDownload =>
@@ -445,25 +452,38 @@ public partial class MainWindow : Window
 
     private async Task CheckApplicationUpdateAsync(bool showLatest)
     {
+        if (_applicationUpdateCancellation is not null || _isClosing) return;
+        using var cancellation = new CancellationTokenSource();
+        _applicationUpdateCancellation = cancellation;
         AppUpdateButton.IsEnabled = false;
+        SettingsAppUpdateButton.IsEnabled = false;
+        var route = GetConnectionLabel();
+        ApplicationUpdateStatusText.Text = $"正在通过{route}检查软件更新…";
+        if (showLatest) FooterStatusText.Text = ApplicationUpdateStatusText.Text;
+        UpdateNetworkUi();
         try
         {
             var proxy = UseProxyCheckBox.IsChecked == true
                 ? NormalizeProxy(ProxyTextBox.Text)
                 : null;
-            var update = await ApplicationUpdateService.CheckAsync(proxy);
+            var update = await ApplicationUpdateService.CheckAsync(proxy, cancellation.Token);
+            if (_isClosing) return;
             if (!update.IsUpdateAvailable)
             {
+                var message = $"当前版本 {update.CurrentVersion.ToString(3)}，GitHub 版本 {update.Tag}，无需更新。";
+                ApplicationUpdateStatusText.Text = message;
+                if (showLatest) FooterStatusText.Text = message;
                 if (showLatest)
                     MessageBox.Show(
-                        $"当前软件版本 {update.CurrentVersion.ToString(3)} 已是最新版。",
-                        "软件已是最新版",
+                        message,
+                        "无需更新",
                         MessageBoxButton.OK,
                         MessageBoxImage.Information);
                 return;
             }
 
             FooterStatusText.Text = $"发现软件新版本 {update.Tag}。";
+            ApplicationUpdateStatusText.Text = FooterStatusText.Text;
             var answer = MessageBox.Show(
                 $"发现软件新版本。\n\n当前版本：{update.CurrentVersion.ToString(3)}"
                 + $"\n最新版本：{update.Tag}\n\n是否打开下载页面？",
@@ -477,18 +497,25 @@ public partial class MainWindow : Window
                     UseShellExecute = true
                 });
         }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
         catch (Exception ex)
         {
+            var explanation = $"通过{route}检查软件更新失败：{FriendlyError(ex.GetBaseException().Message)}";
+            ApplicationUpdateStatusText.Text = explanation;
+            if (showLatest) FooterStatusText.Text = explanation;
             if (showLatest)
                 MessageBox.Show(
-                    FriendlyError(ex.GetBaseException().Message),
+                    explanation,
                     "检查软件更新失败",
                     MessageBoxButton.OK,
                     MessageBoxImage.Warning);
         }
         finally
         {
+            _applicationUpdateCancellation = null;
             AppUpdateButton.IsEnabled = true;
+            SettingsAppUpdateButton.IsEnabled = true;
+            UpdateNetworkUi();
         }
     }
 
@@ -877,7 +904,7 @@ public partial class MainWindow : Window
                 job.FinishedAt = DateTime.Now;
                 job.State = "失败";
                 job.Details = DownloadErrorClassifier.DescribeFailure(
-                    exitCode, _service.LastRawError, job.FailedFiles);
+                    exitCode, _service.LastRawError, job.FailedFiles, job.Options.UseProxy);
                 FooterStatusText.Text = "任务未完成，请按任务卡片中的具体原因处理后继续。";
                 break;
             }
@@ -1105,6 +1132,7 @@ public partial class MainWindow : Window
 
     private string GetCurrentNodeName()
     {
+        if (UseProxyCheckBox.IsChecked != true) return "直接连接";
         if (_clashState is not null
             && !string.IsNullOrWhiteSpace(_resultGroup)
             && _clashState.Proxies.TryGetValue(_resultGroup, out var group)
@@ -1169,6 +1197,7 @@ public partial class MainWindow : Window
         OpenNodeTestButton.IsEnabled = !busy;
         OpenLoginSettingsButton.IsEnabled = !busy;
         AutoFailoverModeComboBox.IsEnabled = !busy;
+        UpdateNetworkUi();
         ActivityProgressBar.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
         ActivityProgressBar.IsIndeterminate = running || _isPreparingResume || _isPreparingNodeTest;
         RefreshCurrentTaskCard();
@@ -1216,10 +1245,9 @@ public partial class MainWindow : Window
             return false;
         }
         if (UseProxyCheckBox.IsChecked == true
-            && (!Uri.TryCreate(NormalizeProxy(ProxyTextBox.Text), UriKind.Absolute, out var proxyUri)
-                || proxyUri.Scheme is not ("http" or "https" or "socks4" or "socks5")))
+            && !NetworkRouting.TryGetProxyUri(ProxyTextBox.Text, out _))
         {
-            message = "Clash 代理地址格式不正确。通常填写 http://127.0.0.1:7897。";
+            message = "代理地址格式不正确。请填写 HTTP / SOCKS 代理地址，或在左下角选择“直连”。";
             return false;
         }
         if (GetSelectedTag(LoginModeComboBox, "manual") == "manual"
@@ -1236,7 +1264,9 @@ public partial class MainWindow : Window
         string error,
         HashSet<string> attemptedNodes)
     {
-        if (GetSelectedTag(AutoFailoverModeComboBox, "top3") == "off"
+        if (UseProxyCheckBox.IsChecked != true
+            || _runningJob?.Options.UseProxy != true
+            || GetSelectedTag(AutoFailoverModeComboBox, "top3") == "off"
             || !DownloadErrorClassifier.IsTransient(error)
             || _mihomoClient is null
             || string.IsNullOrWhiteSpace(_resultGroup))
@@ -1274,23 +1304,79 @@ public partial class MainWindow : Window
         catch { }
     }
 
-    private static string NormalizeProxy(string value)
+    private static string NormalizeProxy(string value) => NetworkRouting.NormalizeProxy(value);
+
+    private string FriendlyError(string message)
     {
-        var text = value.Trim();
-        if (text.Length > 0 && !text.Contains("://"))
-            text = "http://" + text;
-        return text;
+        if (UseProxyCheckBox.IsChecked == true
+            && (message.Contains("proxy", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("refused", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("拒绝", StringComparison.OrdinalIgnoreCase)))
+            return "连接不到填写的代理地址。可以在左下角切换为“直连”，或核对代理软件和端口。";
+        if (message.Contains("github", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("name resolution", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("host is known", StringComparison.OrdinalIgnoreCase))
+            return "无法连接服务器，请检查当前网络和 DNS 后重试。";
+        if (message.Contains("timeout", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("timed out", StringComparison.OrdinalIgnoreCase))
+            return "连接服务器超时，请检查当前网络后重试。";
+        return message;
     }
 
-    private static string FriendlyError(string message)
+    private string GetConnectionLabel() => UseProxyCheckBox.IsChecked == true ? "代理" : "直连";
+
+    private void ConnectionModeComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (message.Contains("proxy", StringComparison.OrdinalIgnoreCase)
-            || message.Contains("actively refused", StringComparison.OrdinalIgnoreCase))
-            return "连接不到当前显示的 Clash 代理地址。若已开启自动识别，程序会保留检测到的端口；也可以核对旁边的地址后重试。";
-        if (message.Contains("github", StringComparison.OrdinalIgnoreCase)
-            || message.Contains("name resolution", StringComparison.OrdinalIgnoreCase))
-            return "无法连接内核下载服务器。请开启 Clash 后重试，必要时先在 Clash 中换一个节点。";
-        return message;
+        if (_applyingSettings || _syncingConnectionMode || UseProxyCheckBox is null) return;
+        UseProxyCheckBox.IsChecked = GetSelectedTag(ConnectionModeComboBox, "direct") == "proxy";
+    }
+
+    private void UseProxyCheckBox_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_applyingSettings || ConnectionModeComboBox is null) return;
+        UpdateNetworkUi();
+        UpdateSettingsSummary();
+        RefreshCurrentTaskCard();
+        SaveSettings();
+    }
+
+    private void UpdateNetworkUi()
+    {
+        if (_applyingSettings) return;
+        var proxy = UseProxyCheckBox.IsChecked == true;
+        var busy = IsOperationBusy || _applicationUpdateCancellation is not null
+            || _cookieVerificationCancellation is not null || _browserImportCancellation is not null;
+        _syncingConnectionMode = true;
+        try { SelectComboByTag(ConnectionModeComboBox, proxy ? "proxy" : "direct"); }
+        finally { _syncingConnectionMode = false; }
+        ConnectionModeComboBox.IsEnabled = !busy;
+        UseProxyCheckBox.IsEnabled = !busy;
+        ProxyTextBox.IsEnabled = proxy && !busy;
+        AutoDetectProxyCheckBox.IsEnabled = proxy && !busy;
+        AutoFailoverModeComboBox.IsEnabled = proxy && !busy;
+        NodeGroupComboBox.IsEnabled = proxy && !busy;
+        NodeTestModeComboBox.IsEnabled = proxy && !busy;
+        QuickNodeTestButton.IsEnabled = proxy && !busy && NodeGroupComboBox.SelectedItem is ProxyInfo;
+        PreciseNodeTestButton.IsEnabled = proxy && !busy && NodeResults.Any(result => result.SuccessfulSamples > 0);
+        UseTestedNodeButton.IsEnabled = proxy && !busy
+            && NodeResultsGrid.SelectedItem is NodeProbeResult { SuccessfulSamples: > 0 };
+        if (!proxy)
+        {
+            ProxyDetectionStatusText.Text = "直连：下载、登录验证和更新均无需 VPN";
+            NodeTestStatusText.Text = "当前使用直连，无需节点测速。需要代理时可在左下角切换连接方式。";
+            NodeCandidateText.Text = "直连模式";
+        }
+        else
+        {
+            ProxyDetectionStatusText.Text = AutoDetectProxyCheckBox.IsChecked == true
+                ? "已启用代理；开始下载或更新组件前自动识别端口"
+                : "已启用代理，使用手动填写的地址";
+            if (NodeCandidateText.Text == "直连模式")
+            {
+                NodeCandidateText.Text = "等待连接 Clash";
+                NodeTestStatusText.Text = "已启用代理。打开“连接诊断”可连接 Clash 并选择测速策略组。";
+            }
+        }
     }
 
     private bool ConfirmBrowserCookieAccess()
@@ -1473,21 +1559,23 @@ public partial class MainWindow : Window
     private async Task<bool> VerifyAndStoreCookieAsync(string cookie, string sourceLabel)
     {
         _cookieVerificationCancellation?.Cancel();
-        _cookieVerificationCancellation?.Dispose();
-        _cookieVerificationCancellation = new CancellationTokenSource();
+        using var verificationCancellation = new CancellationTokenSource();
+        _cookieVerificationCancellation = verificationCancellation;
         VerifyCookieButton.IsEnabled = false;
         ImportBrowserCookieButton.IsEnabled = false;
         CookieStatusText.Foreground = (Brush)FindResource("WarningBrush");
         CookieStatusText.Text = $"正在验证来自{sourceLabel}的登录状态，不会下载图片…";
+        UpdateNetworkUi();
 
         try
         {
             await RefreshAutoDetectedProxyAsync(
                 showStatus: false,
-                _cookieVerificationCancellation.Token);
+                verificationCancellation.Token);
             var proxy = UseProxyCheckBox.IsChecked == true ? NormalizeProxy(ProxyTextBox.Text) : null;
             var result = await CookieVerificationService.VerifyAsync(
-                cookie, proxy, _cookieVerificationCancellation.Token);
+                cookie, proxy, verificationCancellation.Token);
+            verificationCancellation.Token.ThrowIfCancellationRequested();
             CookieStatusText.Foreground = result.ExhentaiValid
                 ? (Brush)FindResource("SuccessBrush")
                 : (Brush)FindResource(result.EhentaiValid ? "WarningBrush" : "DangerBrush");
@@ -1531,8 +1619,13 @@ public partial class MainWindow : Window
         }
         finally
         {
-            VerifyCookieButton.IsEnabled = true;
-            ImportBrowserCookieButton.IsEnabled = true;
+            if (ReferenceEquals(_cookieVerificationCancellation, verificationCancellation))
+            {
+                _cookieVerificationCancellation = null;
+                VerifyCookieButton.IsEnabled = true;
+                ImportBrowserCookieButton.IsEnabled = true;
+                UpdateNetworkUi();
+            }
         }
     }
 
@@ -1644,12 +1737,13 @@ public partial class MainWindow : Window
         bool showStatus,
         CancellationToken cancellationToken = default)
     {
+        if (UseProxyCheckBox.IsChecked != true) return false;
         await _controllerConnectionGate.WaitAsync(cancellationToken);
         try
         {
             if (UseProxyCheckBox.IsChecked != true)
             {
-                ProxyDetectionStatusText.Text = "未使用代理";
+                ProxyDetectionStatusText.Text = "直连，无需 VPN";
                 return false;
             }
             if (AutoDetectProxyCheckBox.IsChecked != true)
@@ -1735,7 +1829,7 @@ public partial class MainWindow : Window
 
     private void ApplyDetectedProxyEndpoint(ClashState state, bool showStatus)
     {
-        if (AutoDetectProxyCheckBox.IsChecked != true
+        if (UseProxyCheckBox.IsChecked != true || AutoDetectProxyCheckBox.IsChecked != true
             || string.IsNullOrWhiteSpace(state.ProxyUrl))
             return;
 
@@ -1753,7 +1847,13 @@ public partial class MainWindow : Window
 
     private async void AutoDetectProxyCheckBox_Changed(object sender, RoutedEventArgs e)
     {
-        if (ProxyDetectionStatusText is null) return;
+        if (_applyingSettings || ProxyDetectionStatusText is null) return;
+        if (UseProxyCheckBox.IsChecked != true)
+        {
+            UpdateNetworkUi();
+            return;
+        }
+        SaveSettings();
         if (AutoDetectProxyCheckBox.IsChecked != true)
         {
             ProxyDetectionStatusText.Text = "使用手动地址";
@@ -1768,6 +1868,11 @@ public partial class MainWindow : Window
     {
         if (IsOperationBusy) return;
         ShowPage(2);
+        if (UseProxyCheckBox.IsChecked != true)
+        {
+            UpdateNetworkUi();
+            return;
+        }
         NodeTestStatusText.Text = "正在连接 Clash/Mihomo 控制接口…";
         await EnsureNodeTesterConnectedAsync(showError: true);
     }
@@ -1788,6 +1893,7 @@ public partial class MainWindow : Window
 
     private async Task<bool> EnsureNodeTesterConnectedAsync(bool showError)
     {
+        if (UseProxyCheckBox.IsChecked != true) return false;
         if (_isConnectingNodeTester) return false;
         _isConnectingNodeTester = true;
         SetRunningUi(false);
@@ -1937,6 +2043,12 @@ public partial class MainWindow : Window
 
     private void UpdateNodeCandidateCount()
     {
+        if (UseProxyCheckBox.IsChecked != true)
+        {
+            NodeCandidateText.Text = "直连模式";
+            QuickNodeTestButton.IsEnabled = false;
+            return;
+        }
         if (_clashState is null || NodeGroupComboBox.SelectedItem is not ProxyInfo group)
         {
             NodeCandidateText.Text = "等待连接 Clash";
@@ -1973,7 +2085,7 @@ public partial class MainWindow : Window
             if (UseProxyCheckBox.IsChecked != true)
             {
                 MessageBox.Show(
-                    "真实节点测试必须勾选“使用 Clash 代理”。",
+                    "节点测速是代理模式的可选功能。直连下载不需要测速；如需测试代理，请先切换连接方式。",
                     "无法开始",
                     MessageBoxButton.OK,
                     MessageBoxImage.Information);
@@ -2408,6 +2520,7 @@ public partial class MainWindow : Window
         NodeGroupComboBox.IsEnabled = !testing && !IsOperationBusy;
         NodeTestModeComboBox.IsEnabled = !testing && !IsOperationBusy;
         OpenNodeTestButton.IsEnabled = !testing && !IsOperationBusy;
+        UpdateNetworkUi();
     }
 
     private void StopNodeTestButton_Click(object sender, RoutedEventArgs e)
@@ -2419,7 +2532,7 @@ public partial class MainWindow : Window
 
     private async void UseTestedNodeButton_Click(object sender, RoutedEventArgs e)
     {
-        if (IsOperationBusy || _mihomoClient is null
+        if (IsOperationBusy || UseProxyCheckBox.IsChecked != true || _mihomoClient is null
             || string.IsNullOrWhiteSpace(_resultGroup)
             || NodeResultsGrid.SelectedItem is not NodeProbeResult
             {

@@ -6,7 +6,21 @@ using EhGalleryDownloader;
 if (args.Contains("--config-ignore"))
 {
     Console.OutputEncoding = new System.Text.UTF8Encoding(false);
+    if (!args.Contains("proxy-env=false")
+        || Environment.GetEnvironmentVariables().Keys.Cast<string>()
+            .Any(key => key.EndsWith("_proxy", StringComparison.OrdinalIgnoreCase)))
+    {
+        Console.Error.WriteLine("FAIL: downloader inherited an implicit proxy route.");
+        return 93;
+    }
     var input = args[^1];
+    if (input == "https://e-hentai.org/g/99999/network-fixture/")
+    {
+        var proxyIndex = Array.IndexOf(args, "--proxy");
+        if (proxyIndex >= 0 && args[proxyIndex + 1] != "http://127.0.0.1:1") return 94;
+        Console.WriteLine("https://test.hath.network/fixture.jpg");
+        return 0;
+    }
     if (input == "https://exhentai.org/g/99999/auth-fixture/")
     {
         Console.Error.WriteLine("[exhentai][info] blank page");
@@ -829,6 +843,8 @@ if (displayJob.GalleryDisplayName != "画廊 3867507"
 }
 Console.WriteLine("PASS: task cards use concise gallery and source labels.");
 
+await NetworkRoutingChecks.RunAsync();
+
 if (args.Contains("--unit-only", StringComparer.OrdinalIgnoreCase))
 {
     Console.WriteLine("PASS: all offline tests completed.");
@@ -904,7 +920,29 @@ if (args.Contains("--update-only", StringComparer.OrdinalIgnoreCase))
     Console.WriteLine(
         $"PASS: application update check resolved {applicationUpdate.Tag} "
         + $"(current {applicationUpdate.CurrentVersion.ToString(3)})." );
+    var directUpdateManager = new EngineManager();
+    var engineUpdate = await directUpdateManager.CheckForUpdateAsync(null);
+    Console.WriteLine($"PASS: direct engine update check resolved {engineUpdate.RemoteVersion}.");
+    if (args.Contains("--install-engine", StringComparer.OrdinalIgnoreCase))
+    {
+        await directUpdateManager.InstallAsync(engineUpdate, null);
+        Console.WriteLine($"PASS: direct engine installation completed: {await directUpdateManager.GetVersionAsync()}.");
+    }
     return 0;
+}
+
+if (args.Contains("--verify-saved-login", StringComparer.OrdinalIgnoreCase))
+{
+    var savedLogin = SecretStore.LoadCookie();
+    if (string.IsNullOrWhiteSpace(savedLogin))
+    {
+        Console.WriteLine("SKIP: no saved login is available for a read-only direct verification.");
+        return 0;
+    }
+    var loginCheck = await CookieVerificationService.VerifyAsync(savedLogin, (string?)null);
+    Console.WriteLine($"Direct login verification: E-Hentai={loginCheck.EhentaiValid}, ExHentai={loginCheck.ExhentaiValid}.");
+    Console.WriteLine(loginCheck.Message);
+    return loginCheck.EhentaiValid && loginCheck.ExhentaiValid ? 0 : 70;
 }
 
 try
@@ -1138,7 +1176,7 @@ var manager = new EngineManager();
 var localEngine = manager.FindEngine()
                   ?? throw new InvalidOperationException("Test output does not contain gallery-dl.exe.");
 var hashBefore = Convert.ToHexString(await SHA256.HashDataAsync(File.OpenRead(localEngine)));
-var update = await manager.CheckForUpdateAsync("http://127.0.0.1:7897");
+var update = await manager.CheckForUpdateAsync(null);
 var hashAfter = Convert.ToHexString(await SHA256.HashDataAsync(File.OpenRead(localEngine)));
 
 Console.WriteLine($"Local engine: {update.LocalVersion}");

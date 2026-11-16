@@ -192,7 +192,7 @@ public sealed class AppSettings
     public bool UseBrowserCookies { get; set; }
     public bool RememberCookie { get; set; } = true;
     public bool CookieStoragePreferenceSet { get; set; }
-    public bool UseProxy { get; set; } = true;
+    public bool UseProxy { get; set; }
     public bool AutoDetectProxy { get; set; } = true;
     public string ProxyUrl { get; set; } = "http://127.0.0.1:7897";
     public bool DownloadOriginal { get; set; } = true;

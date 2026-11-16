@@ -119,6 +119,13 @@
                 <Border Grid.Row="3" Background="White" BorderBrush="#E4E7EC" BorderThickness="1"
                         CornerRadius="9" Padding="14,12">
                     <StackPanel>
+                        <TextBlock Text="连接方式" Foreground="#667085" FontSize="12" Margin="0,0,0,5"/>
+                        <ComboBox x:Name="ConnectionModeComboBox" FontSize="12" MinHeight="32" Margin="0,0,0,12"
+                                  SelectionChanged="ConnectionModeComboBox_SelectionChanged"
+                                  ToolTip="下载、登录验证和更新均使用这里选择的连接方式">
+                            <ComboBoxItem Content="直连 · 无需 VPN" Tag="direct"/>
+                            <ComboBoxItem Content="使用代理" Tag="proxy"/>
+                        </ComboBox>
                         <StackPanel Orientation="Horizontal">
                             <TextBlock x:Name="AppStatusText" Text="等待操作" Foreground="#475467" FontSize="{DynamicResource FontBodySize}"/>
                         </StackPanel>
@@ -432,7 +439,7 @@
                                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                                 <StackPanel>
                                     <TextBlock Text="画廊节点实测" FontSize="{DynamicResource FontCardTitleSize}" FontWeight="SemiBold"/>
-                                    <TextBlock x:Name="NodeTestStatusText" Text="稳定完整传输优先，速度其次。" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Margin="0,5,0,0" TextWrapping="Wrap"/>
+                                    <TextBlock x:Name="NodeTestStatusText" Text="节点实测是可选的代理功能。直连时无需进行节点测速。" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Margin="0,5,0,0" TextWrapping="Wrap"/>
                                 </StackPanel>
                                 <Grid Grid.Row="1" Margin="0,18,0,0">
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="1.15*"/><ColumnDefinition Width="0.9*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -454,7 +461,7 @@
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                         <TextBlock Text="实测排名" FontSize="{DynamicResource FontCardTitleSize}" FontWeight="SemiBold"/>
-                                        <TextBlock x:Name="NodeCandidateText" Text="正在连接 Clash…" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Margin="13,2,0,0"/>
+                                        <TextBlock x:Name="NodeCandidateText" Text="尚未进行节点测速" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Margin="13,2,0,0"/>
                                     </StackPanel>
                                     <TextBlock Grid.Column="1" Text="排序：成功率 → 中断次数 → 实际速度 → 延迟"
                                                Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" VerticalAlignment="Center"/>
@@ -512,8 +519,8 @@
                         <TabItem Header="网络与节点">
                             <Border Style="{StaticResource CardStyle}">
                                 <StackPanel>
-                                    <StackPanel Margin="24,22,24,15"><TextBlock Text="网络与节点" FontSize="{DynamicResource FontCardTitleSize}" FontWeight="SemiBold"/><TextBlock Text="通常保持推荐设置即可" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Margin="0,5,0,0"/></StackPanel>
-                                    <Border Style="{StaticResource SettingRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="320"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="使用 Clash 代理" FontWeight="SemiBold"/><TextBlock x:Name="ProxyDetectionStatusText" Text="等待识别" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Margin="0,4,0,0"/></StackPanel><CheckBox x:Name="UseProxyCheckBox" Grid.Column="1" Content="启用代理" IsChecked="True"/></Grid></Border>
+                                    <StackPanel Margin="24,22,24,15"><TextBlock Text="网络与节点" FontSize="{DynamicResource FontCardTitleSize}" FontWeight="SemiBold"/><TextBlock Text="可以直接连接；需要时再启用 Clash 或自定义代理" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Margin="0,5,0,0"/></StackPanel>
+                                    <Border Style="{StaticResource SettingRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="320"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="代理（可选）" FontWeight="SemiBold"/><TextBlock x:Name="ProxyDetectionStatusText" Text="直连，无需 VPN" TextWrapping="Wrap" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Margin="0,4,8,0"/></StackPanel><CheckBox x:Name="UseProxyCheckBox" Grid.Column="1" Content="使用代理（Clash / 自定义）" IsChecked="False" Checked="UseProxyCheckBox_Changed" Unchecked="UseProxyCheckBox_Changed"/></Grid></Border>
                                     <Border Style="{StaticResource SettingRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="320"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="代理地址" FontWeight="SemiBold"/><TextBlock Text="自动识别失败时可以手动填写" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Margin="0,4,0,0"/></StackPanel><StackPanel Grid.Column="1"><TextBox x:Name="ProxyTextBox" Text="http://127.0.0.1:7897"/><CheckBox x:Name="AutoDetectProxyCheckBox" Content="自动识别端口（推荐）" IsChecked="True" Margin="0,8,0,0" Checked="AutoDetectProxyCheckBox_Changed" Unchecked="AutoDetectProxyCheckBox_Changed"/></StackPanel></Grid></Border>
                                     <Border Style="{StaticResource SettingRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="320"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="节点策略" FontWeight="SemiBold"/><TextBlock Text="失败时自动切换节点并继续下载" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Margin="0,4,0,0"/></StackPanel><ComboBox x:Name="AutoFailoverModeComboBox" Grid.Column="1"><ComboBoxItem Content="自动选择测速前 3 名（推荐）" Tag="top3"/><ComboBoxItem Content="固定使用当前节点" Tag="off"/><ComboBoxItem Content="遍历全部已测速节点" Tag="all"/></ComboBox></Grid></Border>
                                     <Border Style="{StaticResource SettingRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="320"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="优先 IPv4" FontWeight="SemiBold"/><TextBlock Text="部分网络环境下更稳定" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Margin="0,4,0,0"/></StackPanel><CheckBox x:Name="ForceIpv4CheckBox" Grid.Column="1" Content="优先使用 IPv4" IsChecked="True"/></Grid></Border>
@@ -561,7 +568,7 @@
                                 <StackPanel>
                                     <StackPanel Margin="24,22,24,15"><TextBlock Text="软件与更新" FontSize="{DynamicResource FontCardTitleSize}" FontWeight="SemiBold"/><TextBlock x:Name="SettingsVersionText" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Margin="0,5,0,0"/></StackPanel>
                                     <Border Style="{StaticResource SettingRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="下载组件" FontWeight="SemiBold"/><TextBlock Text="组件负责获取图片；下载漫画请返回下载中心添加链接" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Margin="0,4,0,0"/></StackPanel><Button x:Name="SettingsEngineUpdateButton" Grid.Column="1" Content="检查组件更新" Click="InstallEngineButton_Click"/></Grid></Border>
-                                    <Border Style="{StaticResource SettingRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="软件更新" FontWeight="SemiBold"/><TextBlock Text="从 GitHub Release 检查新版本" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Margin="0,4,0,0"/></StackPanel><Button Grid.Column="1" Content="检查软件更新" Click="AppUpdateButton_Click"/></Grid></Border>
+                                    <Border Style="{StaticResource SettingRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="软件更新" FontWeight="SemiBold"/><TextBlock x:Name="ApplicationUpdateStatusText" Text="从 GitHub 检查新版本，使用当前选择的连接方式" TextWrapping="Wrap" Foreground="{StaticResource SubTextBrush}" FontSize="{DynamicResource FontCaptionSize}" Margin="0,4,12,0"/></StackPanel><Button x:Name="SettingsAppUpdateButton" Grid.Column="1" Content="检查软件更新" Click="AppUpdateButton_Click"/></Grid></Border>
                                 </StackPanel>
                             </Border>
                         </TabItem>

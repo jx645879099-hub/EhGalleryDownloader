@@ -24,11 +24,13 @@ public static class DownloadErrorClassifier
             || text.Contains("Insufficient privileges", StringComparison.OrdinalIgnoreCase)
             || text.Contains("requires you to log on", StringComparison.OrdinalIgnoreCase));
 
-    public static string DescribeFailure(int exitCode, string? rawError, int failedFiles)
+    public static string DescribeFailure(int exitCode, string? rawError, int failedFiles, bool useProxy = false)
     {
         if (IsAuthenticationFailure(rawError)) return AuthenticationFailureMessage;
         if (IsTransient(rawError))
-            return "下载因网络连接问题中断，已完成的图片已保留。请检查代理连接或换节点后继续下载。"
+            return (useProxy
+                       ? "下载因网络连接问题中断，已完成的图片已保留。请检查代理连接或换节点后继续下载。"
+                       : "下载因直连网络问题中断，已完成的图片已保留。请检查网络是否能访问画廊后继续下载。")
                    + $"\n具体原因：{rawError}";
         if (!string.IsNullOrWhiteSpace(rawError))
             return $"下载未完成：{rawError}";
